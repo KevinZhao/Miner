@@ -4,8 +4,10 @@ import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.ActionBar;
 import android.app.AlertDialog;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.drawable.Drawable;
@@ -20,9 +22,11 @@ import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
 import android.location.LocationProvider;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
+import android.os.IBinder;
 import android.os.Message;
 import android.provider.Settings;
 import android.support.annotation.NonNull;
@@ -30,6 +34,7 @@ import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
 import android.support.v4.widget.DrawerLayout;
 import android.support.v7.app.AppCompatActivity;
+import android.telephony.TelephonyManager;
 import android.text.TextUtils;
 import android.util.Log;
 import android.view.Gravity;
@@ -67,7 +72,6 @@ import org.json.JSONObject;
 
 import java.io.File;
 import java.io.RandomAccessFile;
-import java.net.Socket;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -168,11 +172,14 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
     private long mCurrentTime;
     private int writeFlag = 0;
 
-    private String host = "192.168.0.110";
-    private int port = 50000;
+    private String host = "192.168.0.118";
+    private int port = 7777;
     private SocketClient socketClient;
-    private Socket client;
-
+//    private Socket client;
+    //手机型号
+    private String systemModel;
+    private String Tag = "MapsActivity";
+    private String deviceID;
     @SuppressLint("HandlerLeak")
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -187,7 +194,7 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
             mapFragment.getMapAsync(this);
             initAll();
 
-        }else {
+        } else {
             Toast.makeText(this, "Please connect to the network", Toast.LENGTH_SHORT).show();
         }
         handler = new Handler() {
@@ -242,10 +249,23 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
      * 初始化方法
      */
     private void initAll() {
-        conn();
+        // 获取手机型号
+        systemModel = Build.MODEL;
+        socketstate.setText("");
         initData();
         initListener();
         setWriteReadPermission();
+        initGpsAndSensor();
+        conn();
+
+
+    }
+
+
+
+    private void initGpsAndSensor() {
+        TelephonyManager telephonyManager = (TelephonyManager) getSystemService(Context.TELEPHONY_SERVICE);
+        deviceID=telephonyManager.getDeviceId();
         lm = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
         isExists = Environment.getExternalStorageState().equals(Environment.MEDIA_MOUNTED);
         if (isExists) {
@@ -305,23 +325,17 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
         // 1秒更新一次，或最小位移变化超过1米更新一次；
         // 注意：此处更新准确度非常低，推荐在service里面启动一个Thread，在run中sleep(10000);然后执行handler.sendMessage(),更新位置
         lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000, 1, locationListener);
-
     }
 
     private void conn() {
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                socketClient = new SocketClient(host, port, onSocketStateListener);
-                client = socketClient.getClient();
-            }
-        }).start();
+        socketClient = new SocketClient(host, port, filePath,onSocketStateListener);
+//        client = socketClient.getClient();
     }
 
     OnSocketStateListener onSocketStateListener = new OnSocketStateListener() {
         @Override
         public void socketstate(final String state) {
-            Log.e("TAG", "socketstate: " + state);
+            Log.e(TAG, "socketstate: " + state);
             runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
@@ -871,23 +885,18 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
             object_google.put("altitude", googleGps.getAltitude());
             object_google.put("speed", googleGps.getSpeed());
             object_google.put("bearing", googleGps.getBearing());
-            jsonObject.put("googleGPS", object_google);
+//            jsonObject.put("googleGPS", object_google);
             JSONObject object_light = new JSONObject();
             object_light.put("lightx", lightBean.getX());
             jsonObject.put("light", object_light);
+            jsonObject.put("deviceID",deviceID);
+            jsonObject.put("frequency",frequency);
             jsonArray.put(jsonObject);
-            new Thread(new Runnable() {
-                @Override
-                public void run() {
-                    if (socketClient != null && client != null && !client.isClosed() && client.isConnected()) {
-                        socketClient.sendMsg(String.valueOf(jsonArray));
-                    }
-                }
-            }).start();
+            socketClient.sendOrder(String.valueOf(jsonArray));
 
-            if (jsonArray.length() > 2000) {
-                writeTxtToFile(jsonArray);
-            }
+//            if (jsonArray.length() > 2000) {
+//                writeTxtToFile(jsonArray);
+//            }
         } catch (JSONException e) {
             e.printStackTrace();
         }
@@ -961,8 +970,12 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
             task_acc.cancel();
         }
         writeFlag = 0;
-        if (jsonArray.length() > 0) {
-            writeTxtToFile(jsonArray);
+//        if (jsonArray.length() > 0) {
+//            writeTxtToFile(jsonArray);
+//        }
+
+        if (socketClient!=null){
+            socketClient.onDestroy();
         }
         handler.removeCallbacksAndMessages(null);
         stopGetData();
@@ -999,6 +1012,7 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
         switch (view.getId()) {
             case R.id.tv_record:
                 if (!isRecord) {
+                    openCamera();
                     if (gpsBean.getLongitude() == 0 && gpsBean.getLatitude() == 0
                             && googleGps.getLongitude() == 0 && googleGps.getLatitude() == 0) {
                         Toast.makeText(MapsActivity.this, "If you have no access to your location information, open your cell phone GPS", Toast.LENGTH_SHORT).show();
@@ -1013,14 +1027,15 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
                         isRecord = true;
                     }
                 } else {
+                    closeCamera();
                     if (timer != null && task != null) {
                         timer.cancel();
                         task.cancel();
                     }
                     writeFlag = 0;
-                    if (jsonArray.length() > 0) {
-                        writeTxtToFile(jsonArray);
-                    }
+//                    if (jsonArray.length() > 0) {
+//                        writeTxtToFile(jsonArray);
+//                    }
                     tvRecord.setText("Record");
                     tvRecord.setTextColor(getResources().getColor(R.color.ori_textcolor));
                     isRecord = false;
@@ -1046,8 +1061,7 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
                 break;
             case R.id.tv_command:
                 switchDrawlayout();
-//                cmddialog("0x01:");
-                openCamera();
+                getLog();
                 break;
             case R.id.tv_command2:
                 switchDrawlayout();
@@ -1071,15 +1085,15 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
         }
     }
 
+    private void getLog() {
+        socketClient.sendOrder("0x04");
+    }
+
     private void openCamera() {
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                if (socketClient!=null){
-                    socketClient.sendMsg("0x01");
-                }
-            }
-        }).start();
+        socketClient.sendOrder("0x01");
+    }
+    private void closeCamera() {
+        socketClient.sendOrder("0x03");
     }
 
     private void cmddialog(final String cmd) {
@@ -1095,14 +1109,7 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
             public void onClick(View v) {
                 final String scommand = cmd + etcommand.getText().toString();
                 if (!TextUtils.isEmpty(scommand)) {
-                    new Thread(new Runnable() {
-                        @Override
-                        public void run() {
-                            if (socketClient != null) {
-                                socketClient.sendMsg(scommand);
-                            }
-                        }
-                    }).start();
+                    socketClient.sendOrder(scommand);
 
                     alertDialog.dismiss();
                 }
@@ -1136,7 +1143,7 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
                     host = shost;
                     port = Integer.valueOf(sport);
                     if (socketClient != null) {
-                        socketClient.closeSocket();
+                        socketClient.onDestroy();
                     }
                     conn();
                     alertDialog.dismiss();

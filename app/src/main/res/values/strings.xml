@@ -9,6 +9,6 @@
     
     <string name="frequency">Frequency</string>
     <string name="ipset">HostConfiguration</string>
-    <string name="command">OpenCamera</string>
+    <string name="command">GetLog</string>
     <string name="command2">SendCommand</string>
 </resources>

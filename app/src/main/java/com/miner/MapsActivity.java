@@ -167,13 +167,13 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
     private Sensor mLightSensor;
     private GPSBean gpsBean = new GPSBean();//GPS
     private GPSBean googleGps = new GPSBean();//GoogleGPS
-    private LightBean lightBean = new LightBean();//光线
-    private AccelerationBean accelerationBean = new AccelerationBean();//加速度
+    private LightBean lightBean = new LightBean();//Light
+    private AccelerationBean accelerationBean = new AccelerationBean();//acc
     private JSONArray jsonArray = new JSONArray();
-    private boolean isExists;//是否存在sd卡
+    private boolean isExists;// sd card exist
     private String filePath;
-    private boolean isRecord;//是否在采集中
-    private boolean isOpen = false;//抽屉是否在打开状态
+    private boolean isRecord;//is it record
+    private boolean isOpen = false;//Whether the drawer is in the open state
     private List<Integer> data;
     private long mCurrentTime;
     private int writeFlag = 0;
@@ -181,10 +181,10 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
     private String host = "192.168.0.115";
     private int port = 7777;
     private SocketClient socketClient;
-    //手机型号
+    //mobile phone model
     private String systemModel;
     private String deviceID;
-    private boolean ishow;//侧边栏修改照相机的频率是否显示
+    private boolean ishow;//Whether the side sidebar modifies the frequency of the camera
 
     @SuppressLint("HandlerLeak")
     @Override
@@ -220,11 +220,8 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
                             LatLng myLatLng = new LatLng(lat, lng);
                             mMap.addMarker(new MarkerOptions()
                                     .position(myLatLng)
-                                    .flat(true)//标记平面化
-                                    //.rotation(45.0f)//将标记旋转45度
-                                    //.icon(BitmapDescriptorFactory.defaultMarker()));
+                                    .flat(true)//Marking planarization
                                     .icon(BitmapDescriptorFactory.fromResource(R.drawable.marker)));
-                            //                            mMap.moveCamera(CameraUpdateFactory.newLatLng(new LatLng(lat, lng)));
                         }
                         Log.i("location", ":" + lat + ";" + lng);
                         break;
@@ -252,10 +249,9 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
     }
 
     /**
-     * 初始化方法
+     * init
      */
     private void initAll() {
-        // 获取手机型号
         systemModel = Build.MODEL;
         socketstate.setText("");
         initData();
@@ -279,34 +275,27 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
         }
         mSensorManager = (SensorManager) getSystemService(SENSOR_SERVICE);
 
-        // 判断GPS是否正常启动
+        // Determine whether GPS is normally started
         if (!lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
             Toast.makeText(this, "Please open the GPS navigation...", Toast.LENGTH_SHORT).show();
-            // 返回开启GPS导航设置界面
+            // Return to open the GPS navigation settings interface
             Intent intent = new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS);
             startActivityForResult(intent, 0);
             return;
         }
 
-        // 为获取地理位置信息时设置查询条件
+        // Setting up query conditions for obtaining geographic location information
         bestProvider = lm.getBestProvider(getCriteria(), true);
 
-        // 获取位置信息
-        // 如果不设置查询要求，getLastKnownLocation方法传人的参数为LocationManager.GPS_PROVIDER
+        // get location information
+        // 如果不设置查询要求，getLastKnownLocation方法传入的参数为LocationManager.GPS_PROVIDER
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED
                 && ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-            // TODO: Consider calling
-            //    ActivityCompat#requestPermissions
-            // here to request the missing permissions, and then overriding
-            //   public void onRequestPermissionsResult(int requestCode, String[] permissions,
-            //                                          int[] grantResults)
-            // to handle the case where the user grants the permission. See the documentation
-            // for ActivityCompat#requestPermissions for more details.
             return;
         }
         Location location = lm.getLastKnownLocation(bestProvider);
         updateView(location, false);
-        // 监听状态
+        // Listening state
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             return;
         }
@@ -345,7 +334,7 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
     };
 
     /**
-     * 初始化数据
+     * init
      */
     private void initData() {
         data = new ArrayList<>();
@@ -358,7 +347,7 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
     }
 
     /**
-     * 设置下拉列表
+     * set spinner
      */
     private void initSpinner() {
         ListView listView = new ListView(this);
@@ -392,7 +381,7 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
     }
 
     /**
-     * 初始化监听器
+     * init listener
      */
     private void initListener() {
         tvRecord.setOnClickListener(this);
@@ -517,7 +506,7 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
     }
 
     /**
-     * 更新定时器
+     * timer
      */
     private void updateTimer() {
         if (timer != null && task != null) {
@@ -987,7 +976,6 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
         switch (view.getId()) {
             case R.id.tv_record:
                 if (!isRecord) {
-                    openCamera();
                     if (gpsBean.getLongitude() == 0 && gpsBean.getLatitude() == 0
                             && googleGps.getLongitude() == 0 && googleGps.getLatitude() == 0) {
                         Toast.makeText(MapsActivity.this, "If you have no access to your location information, open your cell phone GPS", Toast.LENGTH_SHORT).show();
@@ -995,6 +983,8 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
                         jsonArray = new JSONArray();
                         mCurrentTime = System.currentTimeMillis();
                         Toast.makeText(MapsActivity.this, "Start recording data", Toast.LENGTH_SHORT).show();
+                        openCamera();
+                        openenvsensor();
                         //获取数据
                         updateTimer();
                         tvRecord.setText("Stop");
@@ -1002,11 +992,12 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
                         isRecord = true;
                     }
                 } else {
-                    closeCamera();
                     if (timer != null && task != null) {
                         timer.cancel();
                         task.cancel();
                     }
+                    closeenvsensor();
+                    closeCamera();
                     tvRecord.setText("Record");
                     tvRecord.setTextColor(getResources().getColor(R.color.ori_textcolor));
                     isRecord = false;
@@ -1066,7 +1057,7 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
                 break;
             case R.id.cameraFrequency:
                 switchDrawlayout();
-                cmddialog("0x05:TimeFrequency:");
+                cmddialog("0x05:TIME_FREQUENCY:");
                 break;
             case R.id.tv_frequency:
                 //Frequency
@@ -1092,7 +1083,14 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
     private void closeCamera() {
         socketClient.sendOrder("0x03");
     }
-
+    //打开环境传感器
+    private void openenvsensor() {
+        socketClient.sendOrder("0x06");
+    }
+    //关闭环境传感器
+    private void closeenvsensor() {
+        socketClient.sendOrder("0x07");
+    }
     private void cmddialog(final String cmd) {
         final AlertDialog.Builder builder = new AlertDialog.Builder(MapsActivity.this);
         View view = LayoutInflater.from(MapsActivity.this).inflate(R.layout.layout_cmdcommand, null);
@@ -1107,7 +1105,7 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
                 String etstring = etcommand.getText().toString();
                 String scommand = cmd + etstring;
                 if (!TextUtils.isEmpty(scommand)) {
-                    if (cmd.contains("0x05:TimeFrequency:")){
+                    if (cmd.contains("0x05:TIME_FREQUENCY:")){
                         Integer integer = Integer.valueOf(etstring);
                         int i = (1000 / integer);
                         scommand = cmd +i;

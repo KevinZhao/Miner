@@ -29,13 +29,14 @@
             android:textSize="16dp"
             android:textStyle="bold" />
 
+
         <TextView
-            android:id="@+id/tv_command"
+            android:id="@+id/tv_obd"
             android:layout_width="match_parent"
             android:layout_height="40dp"
             android:layout_gravity="center_horizontal"
             android:gravity="center"
-            android:text="@string/command" />
+            android:text="@string/obdprotocols" />
 
         <TextView
             android:id="@+id/tv_command2"
@@ -69,6 +70,24 @@
             android:layout_gravity="center_horizontal"
             android:gravity="center"
             android:text="@string/weight" />
+        <TextView
+            android:id="@+id/imagesize"
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:visibility="gone"
+            android:textSize="12sp"
+            android:layout_gravity="center_horizontal"
+            android:gravity="center"
+            android:text="@string/imagesize" />
+        <TextView
+            android:id="@+id/whitebalance"
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:visibility="gone"
+            android:textSize="12sp"
+            android:layout_gravity="center_horizontal"
+            android:gravity="center"
+            android:text="@string/whitebalance" />
         <TextView
             android:id="@+id/cameraFrequency"
             android:layout_width="match_parent"

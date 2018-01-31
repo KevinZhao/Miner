@@ -19,6 +19,7 @@
         android:layout_marginTop="20dp"
         android:src="@drawable/setting" />
 
+
     <TextView
         android:id="@+id/tv_pop"
         android:layout_width="wrap_content"
@@ -68,7 +69,6 @@
             android:background="@drawable/button_fliter_down"
             android:gravity="center"
             android:text="ClearMap" />
-
     </LinearLayout>
 
     <LinearLayout
@@ -79,74 +79,116 @@
         android:background="@android:color/transparent"
         android:gravity="left|bottom"
         android:orientation="vertical">
-
         <TextView
-            android:id="@+id/tv_gps_lat"
+            android:id="@+id/obdLongitude"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:maxLines="1"
-            android:text="Latitude:0.0" />
+            android:text="o_Longitude:0.0" />
+        <TextView
+            android:id="@+id/obdLatitude"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:maxLines="1"
+            android:text="o_Latitude:0.0" />
+        <TextView
+            android:id="@+id/obdAltitude"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:maxLines="1"
+            android:text="o_Altitude:0.0" />
+        <TextView
+            android:id="@+id/speed"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:maxLines="1"
+            android:text="o_Speed:0.0" />
 
         <TextView
             android:id="@+id/tv_gps_lng"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:maxLines="1"
-            android:text="Longitude:0.0" />
+            android:text="m_Longitude:0.0" />
+        <TextView
+            android:id="@+id/tv_gps_lat"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:maxLines="1"
+            android:text="m_Latitude:0.0" />
 
         <TextView
             android:id="@+id/tv_gps_alt"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:maxLines="1"
-            android:text="Altitude:0.0" />
+            android:text="m_Altitude:0.0" />
 
         <TextView
             android:id="@+id/tv_gps_speed"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:maxLines="1"
-            android:text="Speed:0.0" />
+            android:text="m_Speed:0.0" />
 
         <TextView
             android:id="@+id/tv_gps_bearing"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:maxLines="1"
-            android:text="Heading:0.0" />
+            android:text="m_Bearing:0.0" />
 
         <TextView
             android:id="@+id/tv_acc_x"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:maxLines="1"
-            android:text="AccelerationX:0.0" />
+            android:text="m_AccX:0.0" />
 
         <TextView
             android:id="@+id/tv_acc_y"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:maxLines="1"
-            android:text="AccelerationY:0.0" />
+            android:text="m_AccY:0.0" />
 
         <TextView
             android:id="@+id/tv_acc_z"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:maxLines="1"
-            android:text="AccelerationZ:0.0" />
+            android:text="m_AccZ:0.0" />
 
         <TextView
             android:id="@+id/tv_light_x"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:maxLines="1"
-            android:text="LightX:0.0" />
+            android:text="m_Light:0.0" />
+        <TextView
+            android:id="@+id/gpsStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:maxLines="1"
+            android:text="GPS Status:" />
+        <TextView
+            android:id="@+id/obdStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:maxLines="1"
+            android:text="OBD Status:" />
+        <TextView
+            android:id="@+id/btStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:maxLines="1"
+            android:text="BT Status:" />
 
         <TextView
             android:id="@+id/socketstate"
             android:layout_width="200dp"
-            android:layout_height="wrap_content" />
+            android:layout_height="wrap_content"
+            android:text="TX2 Status:disconnected"/>
 
     </LinearLayout>
 

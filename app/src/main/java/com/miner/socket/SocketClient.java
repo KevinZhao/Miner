@@ -43,6 +43,7 @@ public class SocketClient {
     private String savePath;
     private FileOutputStream fout;
     private ScheduledExecutorService executor;
+    private int testnum=1;
 
 
     public SocketClient(String shost, int sport, String savePath, OnSocketStateListener listener) {
@@ -68,13 +69,12 @@ public class SocketClient {
                         if (client.isConnected() && !client.isClosed()) {
                             /*发送心跳数据*/
                             sendBeatData();
-                            listener.socketstate("Connected");
                         }else {
                             client.close();
                         }
                     } catch (IOException e) {
                         e.printStackTrace();
-                        listener.socketstate("Disconnected");
+                        listener.socketstate("disconnected");
                     }
                 }
             });
@@ -102,10 +102,15 @@ public class SocketClient {
                 bufferedWriter.write("test");
                 bufferedWriter.flush();
                 Log.e(TAG, "run: test" );
+                if (testnum>12){
+                    listener.socketstate("connected");
+                }
+                testnum++;
             } catch (Exception e) {
                 e.printStackTrace();
                         /*发送失败说明socket断开了或者出现了其他错误*/
-                listener.socketstate("Disconnected");
+                testnum=1;
+                listener.socketstate("disconnected");
                 Log.e(TAG, "sendBeatData:" + e.toString());
                 /*重连*/
                 reConn();
@@ -139,7 +144,6 @@ public class SocketClient {
                             bufferedWriter.write(order);
                             bufferedWriter.flush();
                             receiveData();
-                            listener.socketstate("Transmission Completion");
                         }
 
                     } catch (IOException e) {
@@ -150,7 +154,7 @@ public class SocketClient {
             }).start();
 
         } else {
-            listener.socketstate("Disconnected");
+            listener.socketstate("disconnected");
         }
     }
 
@@ -184,13 +188,13 @@ public class SocketClient {
 
                     } catch (IOException e) {
                         e.printStackTrace();
-                        listener.socketstate("Disconnected");
+                        listener.socketstate("disconnected");
                     }
                 }
             }).start();
 
         } else {
-            listener.socketstate("Disconnected");
+            listener.socketstate("disconnected");
         }
     }
 

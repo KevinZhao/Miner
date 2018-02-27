@@ -63,31 +63,4 @@ public class LogTools {
             e.printStackTrace();
         }
     }
-
-    // 生成文件
-    private File makeFilePath(String filePath, String fileName) {
-        File file = null;
-        try {
-            file = new File(filePath + fileName);
-            if (!file.exists()) {
-                file.createNewFile();
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-        return file;
-    }
-
-    // 生成文件夹
-    private static void makeRootDirectory(String filePath) {
-        File file = null;
-        try {
-            file = new File(filePath);
-            if (!file.exists()) {
-                file.mkdirs();
-            }
-        } catch (Exception e) {
-            Log.i("error:", e + "");
-        }
-    }
 }

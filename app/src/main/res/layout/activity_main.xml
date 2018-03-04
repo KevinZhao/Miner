@@ -61,52 +61,99 @@
             android:layout_gravity="center_horizontal"
             android:gravity="center"
             android:text="@string/Config" />
-        <TextView
-            android:id="@+id/weight"
-            android:layout_width="match_parent"
-            android:layout_height="40dp"
-            android:visibility="gone"
-            android:textSize="12sp"
-            android:layout_gravity="center_horizontal"
-            android:gravity="center"
-            android:text="@string/weight" />
-        <TextView
-            android:id="@+id/imagesize"
-            android:layout_width="match_parent"
-            android:layout_height="40dp"
-            android:visibility="gone"
-            android:textSize="12sp"
-            android:layout_gravity="center_horizontal"
-            android:gravity="center"
-            android:text="@string/imagesize" />
-        <TextView
-            android:id="@+id/whitebalance"
-            android:layout_width="match_parent"
-            android:layout_height="40dp"
-            android:visibility="gone"
-            android:textSize="12sp"
-            android:layout_gravity="center_horizontal"
-            android:gravity="center"
-            android:text="@string/whitebalance" />
-        <TextView
-            android:id="@+id/cameraFrequency"
-            android:layout_width="match_parent"
-            android:layout_height="40dp"
-            android:layout_gravity="center_horizontal"
-            android:gravity="center"
-            android:textSize="12sp"
-            android:visibility="gone"
-            android:text="@string/cameraFrequency" />
-        <TextView
-            android:id="@+id/probabilty"
-            android:layout_width="match_parent"
-            android:layout_height="40dp"
-            android:visibility="gone"
-            android:textSize="12sp"
-            android:layout_gravity="center_horizontal"
-            android:gravity="center"
-            android:text="@string/probabilty" />
 
+        <ScrollView
+            android:layout_width="250dp"
+            android:layout_height="wrap_content">
+
+            <LinearLayout
+                android:layout_width="250dp"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+
+                <TextView
+                    android:id="@+id/weight"
+                    android:layout_width="match_parent"
+                    android:layout_height="40dp"
+                    android:layout_gravity="center_horizontal"
+                    android:gravity="center"
+                    android:text="@string/weight"
+                    android:textSize="12sp"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/exposure"
+                    android:layout_width="match_parent"
+                    android:layout_height="40dp"
+                    android:layout_gravity="center_horizontal"
+                    android:gravity="center"
+                    android:text="@string/autoExposure"
+                    android:textSize="12sp"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/logLevel"
+                    android:layout_width="match_parent"
+                    android:layout_height="40dp"
+                    android:layout_gravity="center_horizontal"
+                    android:gravity="center"
+                    android:text="@string/logLevel"
+                    android:textSize="12sp"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/imagesize"
+                    android:layout_width="match_parent"
+                    android:layout_height="40dp"
+                    android:layout_gravity="center_horizontal"
+                    android:gravity="center"
+                    android:text="@string/imagesize"
+                    android:textSize="12sp"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/killProgram"
+                    android:layout_width="match_parent"
+                    android:layout_height="40dp"
+                    android:layout_gravity="center_horizontal"
+                    android:gravity="center"
+                    android:text="@string/killProgram"
+                    android:textSize="12sp"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/whitebalance"
+                    android:layout_width="match_parent"
+                    android:layout_height="40dp"
+                    android:layout_gravity="center_horizontal"
+                    android:gravity="center"
+                    android:text="@string/whitebalance"
+                    android:textSize="12sp"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/cameraFrequency"
+                    android:layout_width="match_parent"
+                    android:layout_height="40dp"
+                    android:layout_gravity="center_horizontal"
+                    android:gravity="center"
+                    android:text="@string/cameraFrequency"
+                    android:textSize="12sp"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/probabilty"
+                    android:layout_width="match_parent"
+                    android:layout_height="40dp"
+                    android:layout_gravity="center_horizontal"
+                    android:gravity="center"
+                    android:text="@string/probabilty"
+                    android:textSize="12sp"
+                    android:visibility="gone" />
+
+            </LinearLayout>
+        </ScrollView>
 
         <TextView
             android:id="@+id/tv_frequency"

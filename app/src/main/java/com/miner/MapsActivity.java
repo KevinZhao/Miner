@@ -85,6 +85,7 @@ import com.miner.obd.ObdReading;
 import com.miner.obd.ObdService;
 import com.miner.socket.SocketClient;
 import com.miner.utils.DateUtil;
+import com.miner.utils.LogTools;
 import com.miner.utils.NetworkUtils;
 import com.miner.utils.PermissionUtils;
 
@@ -98,6 +99,7 @@ import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -190,8 +192,6 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
     TextView imagesize;
     @BindView(R.id.tv_obd)
     TextView tvObdprotocols;
-    @BindView(R.id.gpsStatus)
-    TextView gpsStatus;
     @BindView(R.id.obdStatus)
     TextView obdStatus;
     @BindView(R.id.btStatus)
@@ -204,6 +204,12 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
     TextView obdAltitude;
     @BindView(R.id.speed)
     TextView speed;
+    @BindView(R.id.exposure)
+    TextView exposure;
+    @BindView(R.id.logLevel)
+    TextView logLevel;
+    @BindView(R.id.killProgram)
+    TextView killProgram;
 
     /**
      * Flag indicating whether a requested permission has been denied after returning in
@@ -221,7 +227,6 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
     private TimerTask task_acc;
     private PopupWindow popupWindow;
     private LocationManager lm;
-    private File file;
     private SensorManager mSensorManager;
     private String bestProvider;
     private Sensor mAccelerometer;
@@ -237,7 +242,6 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
     private boolean isOpen = false;//Whether the drawer is in the open state
     private List<Integer> data;
     private long mCurrentTime;
-    private int writeFlag = 0;
 
     private String host = "192.168.43.68";
     private int port = 7777;
@@ -246,7 +250,10 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
     private String systemModel;
     private String deviceID;
     private boolean ishow;//Whether the side sidebar modifies the frequency of the camera
-
+    private boolean isChangeFileName = true;
+    private String logFileName;
+    private File logFile;
+    private Timer logTimer = new Timer();
 
     public Map<String, String> commandResult = new HashMap<String, String>();
     boolean mGpsIsStarted = false;
@@ -315,7 +322,6 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
                     sb.append(String.valueOf(mLastLocation.getLongitude()).substring(0, posLen));
                     sb.append(" Alt: ");
                     sb.append(String.valueOf(mLastLocation.getAltitude()));
-                    gpsStatus.setText("GPS Status:" + sb.toString());
                 }
                 if (prefs.getBoolean(ConfigActivity.UPLOAD_DATA_KEY, false)) {
                     // Upload the current reading by http
@@ -339,6 +345,7 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
             new Handler().postDelayed(mQueueCommands, ConfigActivity.getObdUpdatePeriod(prefs));
         }
     };
+
 
     private void queueCommands() {
         if (isServiceBound) {
@@ -383,12 +390,10 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
             if (mLocProvider != null) {
                 mLocService.addGpsStatusListener(this);
                 if (mLocService.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-                    gpsStatus.setText("GPS Status:" + getString(R.string.status_gps_ready));
                     return true;
                 }
             }
         }
-        gpsStatus.setText("GPS Status:" + getString(R.string.status_gps_no_support));
         showDialog(NO_GPS_SUPPORT);
         Log.e(TAG, "Unable to get GPS PROVIDER");
         // todo disable gps controls into Preferences
@@ -404,6 +409,7 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
 
         if (NetworkUtils.isNetworkAvailable(MapsActivity.this)) {
             // Obtain the SupportMapFragment and get notified when the map is ready to be used.
+
             SupportMapFragment mapFragment = (SupportMapFragment) getSupportFragmentManager().findFragmentById(R.id.map);
             mapFragment.getMapAsync(this);
             initAll();
@@ -439,7 +445,7 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
                         break;
                     case 3:
                         String state = (String) msg.obj;
-                        socketstate.setText("TX2 Status:"+state);
+                        socketstate.setText("TX2 Status:" + state);
                         break;
                     default:
                         break;
@@ -453,6 +459,36 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
             mSensorManager.registerListener(sensorEventListener, mLightSensor, SensorManager.SENSOR_DELAY_UI);
         }
         updateAaccTimer();
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        logTimer.schedule(new TimerTask() {
+            @Override
+            public void run() {
+                String s = MapsActivity.this.getExternalFilesDir("miner").getAbsolutePath();
+                File saveFile = new File(s);
+                File[] files = saveFile.listFiles();
+                List<Long> num = new ArrayList<>();
+                if (files.length > 9) {
+                    for (File file : files) {
+                        String s1 = file.getName().split("\\.")[0];
+                        num.add(Long.parseLong(s1));
+                    }
+                    Collections.sort(num);
+                    int k = 0;
+                    for (int i = num.size() - 1; i >= 0; i--) {
+                        if (k > 9) {
+                            File sf = new File(s, num.get(i) + ".log");
+                            sf.delete();
+                        }
+                        k++;
+                    }
+
+                }
+            }
+        }, 0, 5000);
     }
 
     /**
@@ -478,7 +514,6 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
         isExists = Environment.getExternalStorageState().equals(Environment.MEDIA_MOUNTED);
         if (isExists) {
             filePath = Environment.getExternalStorageDirectory().getPath() + "/Miner";
-            makeRootDirectory(filePath);
         } else {
             Toast.makeText(MapsActivity.this, "No SDCard!", Toast.LENGTH_SHORT).show();
         }
@@ -602,9 +637,12 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
         config.setOnClickListener(this);
         probabilty.setOnClickListener(this);
         weight.setOnClickListener(this);
+        exposure.setOnClickListener(this);
         whitebalance.setOnClickListener(this);
         cameraFrequency.setOnClickListener(this);
+        logLevel.setOnClickListener(this);
         imagesize.setOnClickListener(this);
+        killProgram.setOnClickListener(this);
         tvObdprotocols.setOnClickListener(this);
         TimeListAdapter adapter = new TimeListAdapter(this, data);
         lvFrequency.setAdapter(adapter);
@@ -1001,51 +1039,6 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
 
     }
 
-    // 将字符串写入到文本文件中
-    public void writeTxtToFile(JSONArray array) {
-        String strContent = "No data has been taken for the time being";
-        if (isRecord) {
-            if (jsonArray.length() >= 2000) {
-                writeFlag++;
-            } else {
-                writeFlag = 0;
-            }
-        }
-        if (writeFlag > 0) {
-            file = makeFilePath(filePath, "/" + ms2Date(mCurrentTime) + "-" + writeFlag + ".json");
-        } else {
-            file = makeFilePath(filePath, "/" + ms2Date(mCurrentTime) + ".json");
-        }
-        try {
-            if (array.length() > 0) {
-                strContent = array + "";
-            }
-            RandomAccessFile raf = null;
-            raf = new RandomAccessFile(file, "rwd");
-            raf.seek(file.length());
-            raf.write(strContent.getBytes());
-            raf.close();
-
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-        jsonArray = new JSONArray();
-
-
-    }
-
-    /**
-     * 转换时间格式
-     *
-     * @param _ms
-     * @return
-     */
-    public static String ms2Date(long _ms) {
-        Date date = new Date(_ms);
-        SimpleDateFormat format = new SimpleDateFormat("yyyyMMddHHmmss");
-        return format.format(date);
-    }
-
 
     private JSONArray dealBean() throws JSONException {
 
@@ -1093,33 +1086,6 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
     }
 
 
-    // 生成文件
-    private File makeFilePath(String filePath, String fileName) {
-        File file = null;
-        try {
-            file = new File(filePath + fileName);
-            if (!file.exists()) {
-                file.createNewFile();
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-        return file;
-    }
-
-    // 生成文件夹
-    private static void makeRootDirectory(String filePath) {
-        File file = null;
-        try {
-            file = new File(filePath);
-            if (!file.exists()) {
-                file.mkdir();
-            }
-        } catch (Exception e) {
-            Log.i("error:", e + "");
-        }
-    }
-
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if ((keyCode == KeyEvent.KEYCODE_BACK)) {
@@ -1150,6 +1116,9 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
         if (timer_acc != null && task_acc != null) {
             timer_acc.cancel();
             task_acc.cancel();
+        }
+        if (logTimer != null) {
+            logTimer.cancel();
         }
         if (isRecord) {
             socketClient.sendOrder("0x03");
@@ -1300,15 +1269,21 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
                 if (!ishow) {
                     probabilty.setVisibility(View.VISIBLE);
                     weight.setVisibility(View.VISIBLE);
+                    exposure.setVisibility(View.VISIBLE);
                     cameraFrequency.setVisibility(View.VISIBLE);
+                    logLevel.setVisibility(View.VISIBLE);
                     imagesize.setVisibility(View.VISIBLE);
+                    killProgram.setVisibility(View.VISIBLE);
                     whitebalance.setVisibility(View.VISIBLE);
                     ishow = true;
                 } else {
                     probabilty.setVisibility(View.GONE);
                     weight.setVisibility(View.GONE);
+                    exposure.setVisibility(View.GONE);
                     cameraFrequency.setVisibility(View.GONE);
+                    logLevel.setVisibility(View.GONE);
                     imagesize.setVisibility(View.GONE);
+                    killProgram.setVisibility(View.GONE);
                     whitebalance.setVisibility(View.GONE);
                     ishow = false;
                 }
@@ -1321,9 +1296,21 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
                 switchDrawlayout();
                 cmddialog("0x05:WEIGHT:");
                 break;
+            case R.id.exposure:
+                switchDrawlayout();
+                exposureDialog();
+                break;
+            case R.id.logLevel:
+                switchDrawlayout();
+                logLevelDialog();
+                break;
             case R.id.imagesize:
                 switchDrawlayout();
                 ImageSizeDialog();
+                break;
+            case R.id.killProgram:
+                switchDrawlayout();
+                socketClient.sendOrder("0x09");
                 break;
             case R.id.whitebalance:
                 switchDrawlayout();
@@ -1350,6 +1337,20 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
         }
     }
 
+    private void logLevelDialog() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(MapsActivity.this);
+        //    指定下拉列表的显示数据
+        final String[] modes = {"0", "1", "2", "3", "4", "5"};
+        //    设置一个下拉的列表选择项
+        builder.setItems(modes, new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                socketClient.sendOrder("0x05:level:" + which + "\r");
+            }
+        });
+        builder.show();
+    }
+
     private void ImageSizeDialog() {
         AlertDialog.Builder builder = new AlertDialog.Builder(MapsActivity.this);
         //    指定下拉列表的显示数据
@@ -1364,6 +1365,20 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
                     socketClient.sendOrder("0x05:IMAGESIZE:" + 3 + "\r");
                 }
 
+            }
+        });
+        builder.show();
+    }
+
+    private void exposureDialog() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(MapsActivity.this);
+        //    指定下拉列表的显示数据
+        final String[] modes = {"off", "on", "OnAutoFlash", "OnAlwaysFlash", "OnFlashRedEye"};
+        //    设置一个下拉的列表选择项
+        builder.setItems(modes, new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                socketClient.sendOrder("0x05:AUTOEXPOSURE:" + (which + 1) + "\r");
             }
         });
         builder.show();
@@ -1488,10 +1503,8 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
         if (prefs.getBoolean(ConfigActivity.ENABLE_GPS_KEY, false))
             gpsStart();
         else
-            gpsStatus.setText("GPS Status:" + getString(R.string.status_gps_not_used));
-
-        // screen won't turn off until wakeLock.release()
-        wakeLock.acquire();
+            // screen won't turn off until wakeLock.release()
+            wakeLock.acquire();
 
         if (prefs.getBoolean(ConfigActivity.ENABLE_FULL_LOGGING_KEY, false)) {
 
@@ -1513,6 +1526,7 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
     private void stopLiveData() {
         Log.e(TAG, "Stopping live data..");
 
+        isChangeFileName = true;
         gpsStop();
 
         doUnbindService();
@@ -1551,7 +1565,6 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
             mLocService.requestLocationUpdates(mLocProvider.getName(), getGpsUpdatePeriod(prefs), getGpsDistanceUpdatePeriod(prefs), this);
             mGpsIsStarted = true;
         } else {
-            gpsStatus.setText("GPS Status:" + getString(R.string.status_gps_no_support));
         }
     }
 
@@ -1559,7 +1572,6 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
         if (mGpsIsStarted) {
             mLocService.removeUpdates(this);
             mGpsIsStarted = false;
-            gpsStatus.setText("GPS Status:" + getString(R.string.status_gps_stopped));
         }
     }
 
@@ -1577,6 +1589,7 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
             if (preRequisites) {
                 btStatus.setText("BT Status:" + getString(R.string.status_bluetooth_connecting));
                 Intent serviceIntent = new Intent(this, ObdGatewayService.class);
+                //                Intent serviceIntent = new Intent(this, MockObdGatewayService.class);
                 bindService(serviceIntent, serviceConn, Context.BIND_AUTO_CREATE);
             } else {
                 btStatus.setText("BT Status:" + getString(R.string.status_bluetooth_disabled));
@@ -1596,7 +1609,7 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
             Log.e(TAG, "Unbinding OBD service..");
             unbindService(serviceConn);
             isServiceBound = false;
-            obdStatus.setText("OBD Status:" + getString(R.string.status_obd_disconnected));
+            obdStatus.setText("OBDII Status:" + getString(R.string.status_obd_disconnected));
         }
     }
 
@@ -1648,7 +1661,7 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
         if (job.getState().equals(ObdCommandJob.ObdCommandJobState.EXECUTION_ERROR)) {
             cmdResult = job.getCommand().getResult();
             if (cmdResult != null && isServiceBound) {
-                obdStatus.setText("OBD Status:" + cmdResult.toLowerCase());
+                obdStatus.setText("OBDII Status:" + cmdResult.toLowerCase());
             }
         } else if (job.getState().equals(ObdCommandJob.ObdCommandJobState.BROKEN_PIPE)) {
             if (isServiceBound)
@@ -1658,9 +1671,22 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
         } else {
             cmdResult = job.getCommand().getFormattedResult();
             if (isServiceBound)
-                obdStatus.setText("OBD Status:" + getString(R.string.status_obd_data));
+                obdStatus.setText("OBDII Status:" + getString(R.string.status_obd_data));
         }
         if (isRecord) {
+            long ms = System.currentTimeMillis();
+            if (isChangeFileName) {
+                logFileName = LogTools.ms2Date(ms) + ".log";
+                logFile = LogTools.fileSize(MapsActivity.this, logFileName);
+                isChangeFileName = false;
+            } else {
+                if (LogTools.getFileSize(logFile) > 5.0) {
+                    isChangeFileName = true;
+                } else {
+                    String content = LogTools.ms2Date(ms) + ":" + cmdName + ":" + cmdResult + "\r\n";
+                    LogTools.write2File(logFile, content);
+                }
+            }
             if (cmdID.equals("SPEED")) {
                 JSONObject object = new JSONObject();
                 try {

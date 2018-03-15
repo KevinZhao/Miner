@@ -6,4 +6,5 @@ package com.miner.listener;
 
 public interface OnSocketStateListener {
     void socketstate(String state);
+    void dbTableNumer(String num);
 }

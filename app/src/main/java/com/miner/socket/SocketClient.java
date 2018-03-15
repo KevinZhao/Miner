@@ -1,6 +1,7 @@
 package com.miner.socket;
 
 
+import android.text.TextUtils;
 import android.util.Log;
 
 import com.miner.listener.OnSocketStateListener;
@@ -43,7 +44,7 @@ public class SocketClient {
     private String savePath;
     private FileOutputStream fout;
     private ScheduledExecutorService executor;
-    private int testnum=1;
+    //    private int testnum=1;
 
 
     public SocketClient(String shost, int sport, String savePath, OnSocketStateListener listener) {
@@ -69,12 +70,12 @@ public class SocketClient {
                         if (client.isConnected() && !client.isClosed()) {
                             /*发送心跳数据*/
                             sendBeatData();
-                        }else {
+                        } else {
                             client.close();
                         }
                     } catch (IOException e) {
                         e.printStackTrace();
-                        listener.socketstate("disconnected");
+                        listener.socketstate("Record 无效");
                     }
                 }
             });
@@ -101,16 +102,12 @@ public class SocketClient {
                 bufferedWriter = new BufferedWriter(new OutputStreamWriter(outputStream));
                 bufferedWriter.write("test");
                 bufferedWriter.flush();
-                Log.e(TAG, "run: test" );
-                if (testnum>12){
-                    listener.socketstate("connected");
-                }
-                testnum++;
+                listener.socketstate("connected");
+                receive2String();
             } catch (Exception e) {
                 e.printStackTrace();
                         /*发送失败说明socket断开了或者出现了其他错误*/
-                testnum=1;
-                listener.socketstate("disconnected");
+                listener.socketstate("Record 无效");
                 Log.e(TAG, "sendBeatData:" + e.toString());
                 /*重连*/
                 reConn();
@@ -143,7 +140,7 @@ public class SocketClient {
                             bufferedWriter = new BufferedWriter(new OutputStreamWriter(outputStream));
                             bufferedWriter.write(order);
                             bufferedWriter.flush();
-                            receiveData();
+
                         }
 
                     } catch (IOException e) {
@@ -154,22 +151,22 @@ public class SocketClient {
             }).start();
 
         } else {
-            listener.socketstate("disconnected");
+            listener.socketstate("Record 无效");
         }
     }
 
     /**
      * 接收数据
      */
-    public void receiveData() {
+    public void receive2File() {
         if (client != null && client.isConnected()) {
             new Thread(new Runnable() {
                 @Override
                 public void run() {
                     try {
                         inputStream = client.getInputStream();
-                        String dateTime= DateUtil.getDateTimeFromMillis(System.currentTimeMillis());
-                        File file = new File(savePath + "/"+dateTime+".log");
+                        String dateTime = DateUtil.getDateTimeFromMillis(System.currentTimeMillis());
+                        File file = new File(savePath + "/" + dateTime + ".log");
                         fout = new FileOutputStream(file);
                         int len = 0;
                         if (inputStream != null) {
@@ -186,15 +183,57 @@ public class SocketClient {
                             fout.close();
                         }
 
-                    } catch (IOException e) {
+                    } catch (Exception e) {
                         e.printStackTrace();
-                        listener.socketstate("disconnected");
+                        listener.socketstate("Record 无效");
                     }
                 }
             }).start();
 
         } else {
-            listener.socketstate("disconnected");
+            listener.socketstate("Record 无效");
+        }
+    }
+
+    public void receive2String() {
+        if (client != null && client.isConnected()) {
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        inputStream = client.getInputStream();
+                        if (inputStream != null) {
+                            // 客户端接收服务器端的响应，读取服务器端向客户端的输入流
+                            // 缓冲区
+                            byte[] buffer = new byte[1024];
+                            int len = 0;
+                            // 定义一个StringBuilder存储客户端发过来的数据
+                            StringBuilder sb = new StringBuilder();
+                            int index;
+                            while ( (len=inputStream.read(buffer)) != -1 ) {
+                                String temp = new String(buffer, 0, len);
+                                // 读到结束符，则跳出循环
+                                if ( (index=temp.indexOf("eof")) != -1) {
+                                    sb.append(temp.substring(0, index));
+                                    break;
+                                }
+                                sb.append(temp);
+                            }
+                            String tableNum = sb.toString();
+                            if (!TextUtils.isEmpty(tableNum)) {
+                                listener.dbTableNumer(sb.toString());
+                            }
+                        }
+
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                        listener.socketstate("Record 无效");
+                    }
+                }
+            }).start();
+
+        } else {
+            listener.socketstate("Record 无效");
         }
     }
 
@@ -203,7 +242,7 @@ public class SocketClient {
             Thread.sleep(2000);
             releaseSocket();
             reconnect++;
-            Log.e(TAG, "reConn: "+reconnect );
+            Log.e(TAG, "reConn: " + reconnect);
         } catch (InterruptedException e1) {
             e1.printStackTrace();
         }

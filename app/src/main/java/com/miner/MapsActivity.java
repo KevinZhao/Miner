@@ -5,13 +5,11 @@ import android.annotation.SuppressLint;
 import android.app.ActionBar;
 import android.app.Activity;
 import android.app.AlertDialog;
-import android.app.Dialog;
 import android.bluetooth.BluetoothAdapter;
-import android.content.ComponentName;
+import android.bluetooth.BluetoothDevice;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
-import android.content.ServiceConnection;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
@@ -27,14 +25,11 @@ import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
 import android.location.LocationProvider;
-import android.os.AsyncTask;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
-import android.os.IBinder;
 import android.os.Message;
-import android.os.PowerManager;
 import android.preference.PreferenceManager;
 import android.provider.Settings;
 import android.support.annotation.NonNull;
@@ -49,6 +44,7 @@ import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.LayoutInflater;
 import android.view.View;
+import android.view.WindowManager;
 import android.widget.AdapterView;
 import android.widget.CheckBox;
 import android.widget.EditText;
@@ -58,8 +54,13 @@ import android.widget.PopupWindow;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import com.github.pires.obd.commands.ObdCommand;
-import com.github.pires.obd.enums.AvailableCommandNames;
+
+import com.fr3ts0n.ecu.EcuDataItem;
+import com.fr3ts0n.ecu.prot.obd.ElmProt;
+import com.fr3ts0n.ecu.prot.obd.ObdProt;
+import com.fr3ts0n.pvs.PvChangeEvent;
+import com.fr3ts0n.pvs.PvChangeListener;
+import com.fr3ts0n.pvs.PvList;
 import com.google.android.gms.maps.CameraUpdateFactory;
 import com.google.android.gms.maps.GoogleMap;
 import com.google.android.gms.maps.OnMapReadyCallback;
@@ -67,25 +68,15 @@ import com.google.android.gms.maps.SupportMapFragment;
 import com.google.android.gms.maps.model.BitmapDescriptorFactory;
 import com.google.android.gms.maps.model.LatLng;
 import com.google.android.gms.maps.model.MarkerOptions;
-import com.google.inject.Inject;
 import com.miner.adapter.TimeListAdapter;
 import com.miner.bean.AccelerationBean;
 import com.miner.bean.GPSBean;
 import com.miner.bean.LightBean;
 import com.miner.listener.OnSocketStateListener;
-import com.miner.obd.AbstractGatewayService;
-import com.miner.obd.ConfigActivity;
-import com.miner.obd.LogCSVWriter;
-import com.miner.obd.MockObdGatewayService;
-import com.miner.obd.ObdCommandJob;
-import com.miner.obd.ObdConfig;
-import com.miner.obd.ObdGatewayService;
-import com.miner.obd.ObdProgressListener;
-import com.miner.obd.ObdReading;
-import com.miner.obd.ObdService;
+import com.miner.obd.BtCommService;
+import com.miner.obd.CommService;
 import com.miner.socket.SocketClient;
 import com.miner.utils.DateUtil;
-import com.miner.utils.LogTools;
 import com.miner.utils.NetworkUtils;
 import com.miner.utils.PermissionUtils;
 
@@ -93,42 +84,104 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.IOException;
-import java.io.RandomAccessFile;
-import java.text.SimpleDateFormat;
+import java.beans.PropertyChangeEvent;
+import java.beans.PropertyChangeListener;
+import java.text.DecimalFormat;
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Date;
-import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
+import java.util.Set;
 import java.util.Timer;
 import java.util.TimerTask;
 
 import butterknife.BindView;
 import butterknife.ButterKnife;
-import retrofit.RestAdapter;
-import retrofit.RetrofitError;
-import retrofit.client.Response;
 
-import static com.miner.obd.ConfigActivity.getGpsDistanceUpdatePeriod;
-import static com.miner.obd.ConfigActivity.getGpsUpdatePeriod;
+import static com.miner.SettingsActivity.ELM_TIMING_SELECT;
 
 
 public class MapsActivity extends AppCompatActivity implements OnMapReadyCallback, GoogleMap.OnMyLocationButtonClickListener,
-        GoogleMap.OnMyLocationClickListener, ActivityCompat.OnRequestPermissionsResultCallback, View.OnClickListener, LocationListener, GpsStatus.Listener, ObdProgressListener {
+        GoogleMap.OnMyLocationClickListener, ActivityCompat.OnRequestPermissionsResultCallback, View.OnClickListener, LocationListener, GpsStatus.Listener, PvChangeListener, PropertyChangeListener,
+        SharedPreferences.OnSharedPreferenceChangeListener {
 
 
-    private static final int NO_BLUETOOTH_ID = 0;
-    private static final int BLUETOOTH_DISABLED = 1;
-    private static final int NO_ORIENTATION_SENSOR = 8;
-    private static final int NO_GPS_SUPPORT = 9;
-    private static final int SAVE_TRIP_NOT_AVAILABLE = 11;
-    private static final int REQUEST_ENABLE_BT = 1234;
-    private static boolean bluetoothDefaultIsEnable = false;
+    /**
+     * operating modes
+     */
+    public enum MODE {
+        OFFLINE,//< OFFLINE mode
+        ONLINE,    //< ONLINE mode
+    }
+
+    /**
+     * data view modes
+     */
+    public enum DATA_VIEW_MODE {
+        LIST,       //< data list (un-filtered)
+        FILTERED,   //< data list (filtered)
+    }
+
+    /**
+     * Preselection types
+     */
+    public enum PRESELECT {
+        LAST_DEV_ADDRESS,
+        LAST_ECU_ADDRESS,
+        LAST_SERVICE,
+        LAST_ITEMS,
+        LAST_VIEW_MODE,
+    }
+
+
+    /**
+     * dialog builder
+     */
+    private static AlertDialog.Builder dlgBuilder;
+
+    /**
+     * app preferences ...
+     */
+    protected static SharedPreferences prefs;
+    /**
+     * Member object for the BT comm services
+     */
+    private static CommService mCommService = null;
+    /**
+     * Local Bluetooth adapter
+     */
+    private static BluetoothAdapter mBluetoothAdapter = null;
+    /**
+     * Name of the connected BT device
+     */
+    private static String mConnectedDeviceName = null;
+
+    /**
+     * current OBD service
+     */
+    private int obdService = ElmProt.OBD_SVC_NONE;
+    /**
+     * current operating mode
+     */
+    private MODE mode = MODE.OFFLINE;
+
+    /**
+     * empty string set as default parameter
+     */
+    static final Set<String> emptyStringSet = new HashSet<String>();
+    /**
+     * initial state of bluetooth adapter
+     */
+    private static boolean initialBtStateEnabled = false;
+
+
+    /**
+     * internal Intent request codes
+     */
+    private static final int REQUEST_CONNECT_DEVICE_SECURE = 1;
+    private static final int REQUEST_CONNECT_DEVICE_INSECURE = 2;
+    private static final int REQUEST_ENABLE_BT = 3;
+
     /**
      * Request code for location permission request.
      *
@@ -137,6 +190,40 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
     private static final int LOCATION_PERMISSION_REQUEST_CODE = 1;
     private static final int WRITE_EXTERNAL_STORAGE_CODE = 2;
     private static final int READ_EXTERNAL_STORAGE_CODE = 3;
+
+
+    private static final int DISPLAY_UPDATE_TIME = 1;
+    public static final String KEEP_SCREEN_ON = "keep_screen_on";
+    public static final String ELM_CUSTOM_INIT_CMDS = "elm_custom_init_cmds";
+    /**
+     * Key names for preferences
+     */
+    public static final String DEVICE_NAME = "device_name";
+    public static final String TOAST = "toast";
+    public static final String PREF_USE_LAST = "USE_LAST_SETTINGS";
+    public static final String ELM_ADAPTIVE_TIMING = ELM_TIMING_SELECT;
+    public static final String ELM_RESET_ON_NRC = "elm_reset_on_nrc";
+    public static final String MEASURE_SYSTEM = "measure_system";
+    public static final String PREF_DATA_DISABLE_MAX = "data_disable_max";
+
+    /**
+     * Message types sent from the BluetoothChatService Handler
+     */
+    public static final int MESSAGE_STATE_CHANGE = 1;
+    public static final int MESSAGE_FILE_READ = 2;
+    public static final int MESSAGE_DEVICE_NAME = 4;
+    public static final int MESSAGE_TOAST = 5;
+    public static final int MESSAGE_DATA_ITEMS_CHANGED = 6;
+    public static final int MESSAGE_UPDATE_VIEW = 7;
+    public static final int MESSAGE_OBD_STATE_CHANGED = 8;
+    public static final int MESSAGE_OBD_NUMCODES = 9;
+    public static final int MESSAGE_OBD_ECUS = 10;
+    public static final int MESSAGE_OBD_NRC = 11;
+
+    /**
+     * Timer for display updates
+     */
+    private static Timer updateTimer = new Timer();
 
     @BindView(R.id.cb_traffic)
     CheckBox cbTraffic;
@@ -180,8 +267,6 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
     TextView tvCommand2;
     @BindView(R.id.probabilty)
     TextView probabilty;
-    @BindView(R.id.weight)
-    TextView weight;
     @BindView(R.id.cameraFrequency)
     TextView cameraFrequency;
     @BindView(R.id.config)
@@ -194,8 +279,7 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
     TextView tvObdprotocols;
     @BindView(R.id.obdStatus)
     TextView obdStatus;
-    @BindView(R.id.btStatus)
-    TextView btStatus;
+
     @BindView(R.id.obdLongitude)
     TextView obdLongitude;
     @BindView(R.id.obdLatitude)
@@ -210,6 +294,10 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
     TextView logLevel;
     @BindView(R.id.killProgram)
     TextView killProgram;
+    @BindView(R.id.dbTableNumber)
+    TextView dbTableNumber;
+    @BindView(R.id.envsensorFrequency)
+    TextView envsensorFrequency;
 
     /**
      * Flag indicating whether a requested permission has been denied after returning in
@@ -241,163 +329,25 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
     private boolean isRecord;//is it record
     private boolean isOpen = false;//Whether the drawer is in the open state
     private List<Integer> data;
-    private long mCurrentTime;
 
-    private String host = "192.168.43.68";
+    private String host = "192.168.111.103";
     private int port = 7777;
     private SocketClient socketClient;
     //mobile phone model
     private String systemModel;
     private String deviceID;
     private boolean ishow;//Whether the side sidebar modifies the frequency of the camera
-    private boolean isChangeFileName = true;
-    private String logFileName;
-    private File logFile;
-    private Timer logTimer = new Timer();
-
-    public Map<String, String> commandResult = new HashMap<String, String>();
-    boolean mGpsIsStarted = false;
-    private LogCSVWriter myCSVWriter;
-    @Inject
-    private SharedPreferences prefs;
-    private boolean isServiceBound;
-    private AbstractGatewayService service;
-    private PowerManager.WakeLock wakeLock = null;
-    private LocationManager mLocService;
-    private LocationProvider mLocProvider;
+    private long mCurrentTime;
     private Location mLastLocation;
-    @Inject
-    private PowerManager powerManager;
-    private boolean preRequisites = true;
-    private ServiceConnection serviceConn = new ServiceConnection() {
-        @Override
-        public void onServiceConnected(ComponentName className, IBinder binder) {
-            Log.e(TAG, className.toString() + " service is bound");
-            isServiceBound = true;
-            service = ((AbstractGatewayService.AbstractGatewayServiceBinder) binder).getService();
-            service.setContext(MapsActivity.this);
-            Log.e(TAG, "Starting live data");
-            try {
-                service.startService();
-                if (preRequisites)
-                    btStatus.setText("BT Status:" + getString(R.string.status_bluetooth_connected));
-            } catch (IOException ioe) {
-                Log.e(TAG, "Failure Starting live data");
-                btStatus.setText("BT Status:" + getString(R.string.status_bluetooth_error_connecting));
-                doUnbindService();
-            }
-        }
 
-        @Override
-        protected Object clone() throws CloneNotSupportedException {
-            return super.clone();
-        }
-
-        // This method is *only* called when the connection to the service is lost unexpectedly
-        // and *not* when the client unbinds (http://developer.android.com/guide/components/bound-services.html)
-        // So the isServiceBound attribute should also be set to false when we unbind from the service.
-        @Override
-        public void onServiceDisconnected(ComponentName className) {
-            Log.e(TAG, className.toString() + " service is unbound");
-            isServiceBound = false;
-        }
-    };
-    double obdlat = 0;
-    double obdlon = 0;
-    double obdalt = 0;
-    private final Runnable mQueueCommands = new Runnable() {
-        public void run() {
-            if (service != null && service.isRunning() && service.queueEmpty()) {
-                queueCommands();
-                final int posLen = 7;
-                if (mGpsIsStarted && mLastLocation != null) {
-                    obdlat = mLastLocation.getLatitude();
-                    obdlon = mLastLocation.getLongitude();
-                    obdalt = mLastLocation.getAltitude();
-
-                    StringBuilder sb = new StringBuilder();
-                    sb.append("Lat: ");
-                    sb.append(String.valueOf(mLastLocation.getLatitude()).substring(0, posLen));
-                    sb.append(" Lon: ");
-                    sb.append(String.valueOf(mLastLocation.getLongitude()).substring(0, posLen));
-                    sb.append(" Alt: ");
-                    sb.append(String.valueOf(mLastLocation.getAltitude()));
-                }
-                if (prefs.getBoolean(ConfigActivity.UPLOAD_DATA_KEY, false)) {
-                    // Upload the current reading by http
-                    final String vin = prefs.getString(ConfigActivity.VEHICLE_ID_KEY, "UNDEFINED_VIN");
-                    Map<String, String> temp = new HashMap<String, String>();
-                    temp.putAll(commandResult);
-                    ObdReading reading = new ObdReading(obdlat, obdlon, obdalt, System.currentTimeMillis(), vin, temp);
-                    new UploadAsyncTask().execute(reading);
-
-                } else if (prefs.getBoolean(ConfigActivity.ENABLE_FULL_LOGGING_KEY, false)) {
-                    // Write the current reading to CSV
-                    final String vin = prefs.getString(ConfigActivity.VEHICLE_ID_KEY, "UNDEFINED_VIN");
-                    Map<String, String> temp = new HashMap<String, String>();
-                    temp.putAll(commandResult);
-                    ObdReading reading = new ObdReading(obdlat, obdlon, obdalt, System.currentTimeMillis(), vin, temp);
-                    if (reading != null) myCSVWriter.writeLineCSV(reading);
-                }
-                commandResult.clear();
-            }
-            // run again in period defined in preferences
-            new Handler().postDelayed(mQueueCommands, ConfigActivity.getObdUpdatePeriod(prefs));
-        }
-    };
-
-
-    private void queueCommands() {
-        if (isServiceBound) {
-            for (ObdCommand Command : ObdConfig.getCommands()) {
-                if (prefs.getBoolean(Command.getName(), true))
-                    service.queueJob(new ObdCommandJob(Command));
-            }
-        }
-    }
+    private double obdlon = 0;
+    private double obdlat = 0;
+    private double obdalt = 0;
 
     @Override
     protected void onResume() {
         super.onResume();
-        powerManager = (PowerManager) getSystemService(POWER_SERVICE);
-        wakeLock = powerManager.newWakeLock(PowerManager.SCREEN_DIM_WAKE_LOCK, "ObdReader");
-        // get Bluetooth device
-        final BluetoothAdapter btAdapter = BluetoothAdapter
-                .getDefaultAdapter();
 
-        preRequisites = btAdapter != null && btAdapter.isEnabled();
-        prefs = PreferenceManager.getDefaultSharedPreferences(this);
-        if (!preRequisites && prefs.getBoolean(ConfigActivity.ENABLE_BT_KEY, false)) {
-            preRequisites = btAdapter != null && btAdapter.enable();
-        }
-
-        gpsInit();
-
-        if (!preRequisites) {
-            showDialog(BLUETOOTH_DISABLED);
-            btStatus.setText("BT Status:" + getString(R.string.status_bluetooth_disabled));
-        } else {
-            btStatus.setText("BT Status:" + getString(R.string.status_bluetooth_ok));
-        }
-        startLiveData();
-    }
-
-
-    private boolean gpsInit() {
-        mLocService = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
-        if (mLocService != null) {
-            mLocProvider = mLocService.getProvider(LocationManager.GPS_PROVIDER);
-            if (mLocProvider != null) {
-                mLocService.addGpsStatusListener(this);
-                if (mLocService.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-                    return true;
-                }
-            }
-        }
-        showDialog(NO_GPS_SUPPORT);
-        Log.e(TAG, "Unable to get GPS PROVIDER");
-        // todo disable gps controls into Preferences
-        return false;
     }
 
     @SuppressLint("HandlerLeak")
@@ -407,15 +357,11 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
         setContentView(R.layout.activity_main);
         ButterKnife.bind(this);
 
-        if (NetworkUtils.isNetworkAvailable(MapsActivity.this)) {
-            // Obtain the SupportMapFragment and get notified when the map is ready to be used.
+        // Obtain the SupportMapFragment and get notified when the map is ready to be used.
+        SupportMapFragment mapFragment = (SupportMapFragment) getSupportFragmentManager().findFragmentById(R.id.map);
+        mapFragment.getMapAsync(this);
+        initAll();
 
-            SupportMapFragment mapFragment = (SupportMapFragment) getSupportFragmentManager().findFragmentById(R.id.map);
-            mapFragment.getMapAsync(this);
-            initAll();
-        } else {
-            Toast.makeText(this, "Please connect to the network", Toast.LENGTH_SHORT).show();
-        }
         handler = new Handler() {
             @Override
             public void handleMessage(Message msg) {
@@ -431,21 +377,27 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
                         }
                         if (lat > 0 && lng > 0) {
                             LatLng myLatLng = new LatLng(lat, lng);
-                            mMap.addMarker(new MarkerOptions()
-                                    .position(myLatLng)
-                                    .flat(true)//Marking planarization
-                                    .icon(BitmapDescriptorFactory.fromResource(R.drawable.marker)));
+                            if (mMap != null) {
+                                mMap.addMarker(new MarkerOptions()
+                                        .position(myLatLng)
+                                        .flat(true)//Marking planarization
+                                        .icon(BitmapDescriptorFactory.fromResource(R.drawable.marker)));
+                            }
                         }
                         Log.i("location", ":" + lat + ";" + lng);
                         break;
                     case 2:
-                        tvAccX.setText("m_AccX：" + accelerationBean.getX());
-                        tvAccY.setText("m_AccY：" + accelerationBean.getY());
-                        tvAccZ.setText("m_AccZ: " + accelerationBean.getZ());
+                        tvAccX.setText("m_AccX：" + keep3decimal(accelerationBean.getX()));
+                        tvAccY.setText("m_AccY：" + keep3decimal(accelerationBean.getY()));
+                        tvAccZ.setText("m_AccZ: " + keep3decimal(accelerationBean.getZ()));
                         break;
                     case 3:
                         String state = (String) msg.obj;
                         socketstate.setText("TX2 Status:" + state);
+                        break;
+                    case 4:
+                        String dbTableNum = (String) msg.obj;
+                        dbTableNumber.setText("Recognized Objects:" + dbTableNum);
                         break;
                     default:
                         break;
@@ -464,40 +416,37 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
     @Override
     protected void onStart() {
         super.onStart();
-        logTimer.schedule(new TimerTask() {
-            @Override
-            public void run() {
-                String s = MapsActivity.this.getExternalFilesDir("miner").getAbsolutePath();
-                File saveFile = new File(s);
-                File[] files = saveFile.listFiles();
-                List<Long> num = new ArrayList<>();
-                if (files.length > 9) {
-                    for (File file : files) {
-                        String s1 = file.getName().split("\\.")[0];
-                        num.add(Long.parseLong(s1));
-                    }
-                    Collections.sort(num);
-                    int k = 0;
-                    for (int i = num.size() - 1; i >= 0; i--) {
-                        if (k > 9) {
-                            File sf = new File(s, num.get(i) + ".log");
-                            sf.delete();
-                        }
-                        k++;
-                    }
-
-                }
-            }
-        }, 0, 5000);
     }
 
     /**
      * init
      */
     private void initAll() {
-        final BluetoothAdapter btAdapter = BluetoothAdapter.getDefaultAdapter();
-        if (btAdapter != null)
-            bluetoothDefaultIsEnable = btAdapter.isEnabled();
+        dlgBuilder = new AlertDialog.Builder(this);
+        // get preferences
+        prefs = PreferenceManager.getDefaultSharedPreferences(this);
+        // register for later changes
+        prefs.registerOnSharedPreferenceChangeListener(this);
+        onSharedPreferenceChanged(prefs, null);
+        setDataListeners();
+        // automate elm status display
+        CommService.elm.addPropertyChangeListener(this);
+        switch (CommService.medium) {
+            case BLUETOOTH:
+                // Get local Bluetooth adapter
+                mBluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
+                // If BT is not on, request that it be enabled.
+                if (mBluetoothAdapter != null) {
+                    // remember initial bluetooth state
+                    initialBtStateEnabled = mBluetoothAdapter.isEnabled();
+                    if (!initialBtStateEnabled) {
+                        Intent enableIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
+                        startActivityForResult(enableIntent, REQUEST_ENABLE_BT);
+                    }
+                }
+                break;
+        }
+
         systemModel = Build.MODEL;
         initData();
         initListener();
@@ -574,6 +523,20 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
                 }
             });
         }
+
+        @Override
+        public void dbTableNumer(final String num) {
+            Log.e(TAG, "dbTableNumber: " + num);
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    Message message = new Message();
+                    message.what = 4;
+                    message.obj = num;
+                    handler.sendMessage(message);
+                }
+            });
+        }
     };
 
     /**
@@ -636,10 +599,10 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
         tvCommand2.setOnClickListener(this);
         config.setOnClickListener(this);
         probabilty.setOnClickListener(this);
-        weight.setOnClickListener(this);
         exposure.setOnClickListener(this);
         whitebalance.setOnClickListener(this);
         cameraFrequency.setOnClickListener(this);
+        envsensorFrequency.setOnClickListener(this);
         logLevel.setOnClickListener(this);
         imagesize.setOnClickListener(this);
         killProgram.setOnClickListener(this);
@@ -1007,31 +970,37 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
             lng = location.getLongitude();
             if (!isGoogle) {
                 //手机自带GPS信息
-                gpsBean.setLongitude(location.getLongitude());
-                gpsBean.setLatitude(location.getLatitude());
-                gpsBean.setAltitude(location.getAltitude());
-                gpsBean.setBearing(location.getBearing());
+                gpsBean.setLongitude(keep3decimal(location.getLongitude()));
+                gpsBean.setLatitude(keep3decimal(location.getLatitude()));
+                gpsBean.setAltitude(keep3decimal(location.getAltitude()));
+                gpsBean.setBearing(keep3decimal(location.getBearing()));
                 gpsBean.setSpeed(location.getSpeed());
             } else {
                 //GoogleGPS
-                googleGps.setLongitude(location.getLongitude());
-                googleGps.setLatitude(location.getLatitude());
-                googleGps.setAltitude(location.getAltitude());
-                googleGps.setBearing(location.getBearing());
+                googleGps.setLongitude(keep3decimal(location.getLongitude()));
+                googleGps.setLatitude(keep3decimal(location.getLatitude()));
+                googleGps.setAltitude(keep3decimal(location.getAltitude()));
+                googleGps.setBearing(keep3decimal(location.getBearing()));
                 googleGps.setSpeed(location.getSpeed());
             }
             if (gpsBean.getLongitude() != 0 && gpsBean.getLatitude() != 0) {
                 tvGpsLat.setText("m_Latitude: " + gpsBean.getLatitude());
                 tvGpsLng.setText("m_Longitude: " + gpsBean.getLongitude());
                 tvGpsAlt.setText("m_Altitude: " + gpsBean.getAltitude());
+                if (mode == MODE.ONLINE) {
+                    obdlon = gpsBean.getLongitude();
+                    obdlat = gpsBean.getLatitude();
+                    obdalt = gpsBean.getLongitude();
+                }
+
                 tvGpsSpeed.setText("m_Speed: " + gpsBean.getSpeed());
-                tvGpsBearing.setText("m_Bearing: " + gpsBean.getBearing());
+                tvGpsBearing.setText("m_Heading: " + gpsBean.getBearing());
             } else {
                 tvGpsLat.setText("m_Latitude: " + googleGps.getLatitude());
                 tvGpsLng.setText("m_Longitude: " + googleGps.getLongitude());
                 tvGpsAlt.setText("m_Altitude: " + googleGps.getAltitude());
                 tvGpsSpeed.setText("m_Speed: " + googleGps.getSpeed());
-                tvGpsBearing.setText("m_Bearing: " + googleGps.getBearing());
+                tvGpsBearing.setText("m_Heading: " + googleGps.getBearing());
             }
 
 
@@ -1039,6 +1008,10 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
 
     }
 
+    public double keep3decimal(double f) {
+        DecimalFormat df = new DecimalFormat("#.000");
+        return Double.parseDouble(df.format(f));
+    }
 
     private JSONArray dealBean() throws JSONException {
 
@@ -1056,7 +1029,7 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
             jsonObject.put("lightx", lightBean.getX());
             jsonObject.put("deviceID", deviceID);
             jsonObject.put("frequency", frequency);
-            socketClient.sendOrder(String.valueOf(jsonObject));
+            scorder(String.valueOf(jsonObject));
         } catch (JSONException e) {
             e.printStackTrace();
         }
@@ -1090,7 +1063,7 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if ((keyCode == KeyEvent.KEYCODE_BACK)) {
             if (isRecord) {
-                socketClient.sendOrder("0x03");
+                scorder("0x03");
             }
         }
         return super.onKeyDown(keyCode, event);
@@ -1099,12 +1072,69 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
     @Override
     protected void onPause() {
         super.onPause();
-        releaseWakeLockIfHeld();
+    }
+
+    @Override
+    public void onActivityResult(int requestCode, int resultCode, Intent data) {
+        boolean secureConnection = false;
+        switch (requestCode) {
+            // device is connected
+            case REQUEST_CONNECT_DEVICE_SECURE:
+                secureConnection = true;
+                // no break here ...
+            case REQUEST_CONNECT_DEVICE_INSECURE:
+                // When BtDeviceListActivity returns with a device to connect
+                if (resultCode == Activity.RESULT_OK) {
+                    // Get the device MAC address
+                    String address = data.getExtras().getString(
+                            BtDeviceListActivity.EXTRA_DEVICE_ADDRESS);
+                    // save reported address as last setting
+                    prefs.edit().putString(PRESELECT.LAST_DEV_ADDRESS.toString(), address).apply();
+                    connectBtDevice(address, secureConnection);
+                } else {
+                    setMode(MODE.OFFLINE);
+                }
+                break;
+
+            // bluetooth enabled
+            case REQUEST_ENABLE_BT:
+                // When the request to enable Bluetooth returns
+                if (resultCode == Activity.RESULT_OK) {
+                    // Start online mode
+                    setMode(MODE.ONLINE);
+                }
+                break;
+        }
     }
 
     @Override
     protected void onDestroy() {
         // TODO Auto-generated method stub
+        try {
+            // Reduce ELM power consumption by setting it to sleep
+            CommService.elm.goToSleep();
+            // wait until message is out ...
+            Thread.sleep(100, 0);
+        } catch (InterruptedException e) {
+            // do nothing
+        }
+
+		/* don't listen to ELM data changes any more */
+        removeDataListeners();
+        // don't listen to ELM property changes any more
+        CommService.elm.removePropertyChangeListener(this);
+
+        // stop demo service if it was started
+        setMode(MODE.OFFLINE);
+
+        // stop communication service
+        if (mCommService != null) mCommService.stop();
+
+        // if bluetooth adapter was switched OFF before ...
+        if (mBluetoothAdapter != null && !initialBtStateEnabled) {
+            // ... turn it OFF again
+            mBluetoothAdapter.disable();
+        }
         super.onDestroy();
         if (mMap != null) {
             mMap.clear();
@@ -1117,11 +1147,9 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
             timer_acc.cancel();
             task_acc.cancel();
         }
-        if (logTimer != null) {
-            logTimer.cancel();
-        }
+
         if (isRecord) {
-            socketClient.sendOrder("0x03");
+            scorder("0x03");
         }
         if (socketClient != null) {
             socketClient.onDestroy();
@@ -1130,19 +1158,6 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
         stopGetData();
 
 
-        if (mLocService != null) {
-            mLocService.removeGpsStatusListener(this);
-            mLocService.removeUpdates(this);
-        }
-
-        releaseWakeLockIfHeld();
-        if (isServiceBound) {
-            doUnbindService();
-        }
-
-        final BluetoothAdapter btAdapter = BluetoothAdapter.getDefaultAdapter();
-        if (btAdapter != null && btAdapter.isEnabled() && !bluetoothDefaultIsEnable)
-            btAdapter.disable();
     }
 
     /**
@@ -1172,42 +1187,6 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
     }
 
     @Override
-    protected Dialog onCreateDialog(int id) {
-        AlertDialog.Builder build = new AlertDialog.Builder(this);
-        switch (id) {
-            case NO_BLUETOOTH_ID:
-                build.setMessage(getString(R.string.text_no_bluetooth_id));
-                return build.create();
-            case BLUETOOTH_DISABLED:
-                Intent enableBtIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
-                startActivityForResult(enableBtIntent, REQUEST_ENABLE_BT);
-                return build.create();
-            case NO_ORIENTATION_SENSOR:
-                build.setMessage(getString(R.string.text_no_orientation_sensor));
-                return build.create();
-            case NO_GPS_SUPPORT:
-                build.setMessage(getString(R.string.text_no_gps_support));
-                return build.create();
-            case SAVE_TRIP_NOT_AVAILABLE:
-                build.setMessage(getString(R.string.text_save_trip_not_available));
-                return build.create();
-        }
-        return null;
-    }
-
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        if (requestCode == REQUEST_ENABLE_BT) {
-            if (resultCode == Activity.RESULT_OK) {
-                btStatus.setText(getString(R.string.status_bluetooth_connected));
-            } else {
-                Toast.makeText(this, R.string.text_bluetooth_disabled, Toast.LENGTH_LONG).show();
-            }
-        }
-        super.onActivityResult(requestCode, resultCode, data);
-    }
-
-    @Override
     public void onClick(View view) {
         switch (view.getId()) {
             case R.id.tv_record:
@@ -1222,6 +1201,7 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
                         openenvsensor();
                         //获取数据
                         updateTimer();
+                        setMode(MODE.ONLINE);
                         tvRecord.setText("Stop");
                         tvRecord.setTextColor(Color.RED);
                         isRecord = true;
@@ -1235,6 +1215,8 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
                     closeCamera();
                     tvRecord.setText("Record");
                     tvRecord.setTextColor(getResources().getColor(R.color.ori_textcolor));
+                    if (mCommService != null) mCommService.stop();
+                    setMode(MODE.OFFLINE);
                     isRecord = false;
                 }
 
@@ -1266,59 +1248,47 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
                 ipdialog();
                 break;
             case R.id.config:
-                if (!ishow) {
-                    probabilty.setVisibility(View.VISIBLE);
-                    weight.setVisibility(View.VISIBLE);
-                    exposure.setVisibility(View.VISIBLE);
-                    cameraFrequency.setVisibility(View.VISIBLE);
-                    logLevel.setVisibility(View.VISIBLE);
-                    imagesize.setVisibility(View.VISIBLE);
-                    killProgram.setVisibility(View.VISIBLE);
-                    whitebalance.setVisibility(View.VISIBLE);
-                    ishow = true;
-                } else {
-                    probabilty.setVisibility(View.GONE);
-                    weight.setVisibility(View.GONE);
-                    exposure.setVisibility(View.GONE);
-                    cameraFrequency.setVisibility(View.GONE);
-                    logLevel.setVisibility(View.GONE);
-                    imagesize.setVisibility(View.GONE);
-                    killProgram.setVisibility(View.GONE);
-                    whitebalance.setVisibility(View.GONE);
-                    ishow = false;
-                }
+                isDisplay();
                 break;
             case R.id.probabilty:
                 switchDrawlayout();
-                cmddialog("0x05:PROBABILITY:");
-                break;
-            case R.id.weight:
-                switchDrawlayout();
-                cmddialog("0x05:WEIGHT:");
+                setProbabilityDialog();
+                isDisplay();
                 break;
             case R.id.exposure:
                 switchDrawlayout();
                 exposureDialog();
+                isDisplay();
                 break;
             case R.id.logLevel:
                 switchDrawlayout();
                 logLevelDialog();
+                isDisplay();
                 break;
             case R.id.imagesize:
                 switchDrawlayout();
                 ImageSizeDialog();
+                isDisplay();
                 break;
             case R.id.killProgram:
                 switchDrawlayout();
-                socketClient.sendOrder("0x09");
+                scorder("0x09");
+                isDisplay();
                 break;
             case R.id.whitebalance:
                 switchDrawlayout();
                 whitebalanceDialog();
+                isDisplay();
                 break;
             case R.id.cameraFrequency:
                 switchDrawlayout();
-                cmddialog("0x05:TIME_FREQUENCY:");
+                setCameraFrequencyDialog();
+                isDisplay();
+                break;
+            case R.id.envsensorFrequency:
+                switchDrawlayout();
+                cmddialog("0x05:check_sensor_state_interval_seconds:");
+                isDisplay();
                 break;
             case R.id.tv_frequency:
                 //Frequency
@@ -1330,11 +1300,72 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
                 break;
             case R.id.tv_obd:
                 switchDrawlayout();
-                startActivity(new Intent(MapsActivity.this, ConfigActivity.class));
+                Intent settingsIntent = new Intent(MapsActivity.this, SettingsActivity.class);
+                startActivity(settingsIntent);
                 break;
             default:
                 break;
         }
+    }
+
+    private void isDisplay() {
+        if (!ishow) {
+            probabilty.setVisibility(View.VISIBLE);
+            exposure.setVisibility(View.VISIBLE);
+            cameraFrequency.setVisibility(View.VISIBLE);
+            envsensorFrequency.setVisibility(View.VISIBLE);
+            logLevel.setVisibility(View.VISIBLE);
+            imagesize.setVisibility(View.VISIBLE);
+            killProgram.setVisibility(View.VISIBLE);
+            whitebalance.setVisibility(View.VISIBLE);
+            ishow = true;
+        } else {
+            probabilty.setVisibility(View.GONE);
+            exposure.setVisibility(View.GONE);
+            cameraFrequency.setVisibility(View.GONE);
+            envsensorFrequency.setVisibility(View.GONE);
+            logLevel.setVisibility(View.GONE);
+            imagesize.setVisibility(View.GONE);
+            killProgram.setVisibility(View.GONE);
+            whitebalance.setVisibility(View.GONE);
+            ishow = false;
+        }
+    }
+
+    private void setProbabilityDialog() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(MapsActivity.this);
+        //    指定下拉列表的显示数据
+        final String[] modes = {"0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9"};
+        //    设置一个下拉的列表选择项
+        builder.setItems(modes, new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                scorder("0x05:probability:" + modes[which]);
+
+            }
+        });
+        builder.show();
+    }
+
+    private void setCameraFrequencyDialog() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(MapsActivity.this);
+        //    指定下拉列表的显示数据
+        final String[] modes = {"1秒1张", "1秒2张", "1秒4张"};
+        //    设置一个下拉的列表选择项
+        builder.setItems(modes, new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                if (which == 0) {
+                    scorder("0x05:time_frequency:" + 1000);
+                } else if (which == 1) {
+                    scorder("0x05:time_frequency:" + 500);
+                } else if (which == 2) {
+                    scorder("0x05:time_frequency:" + 250);
+                }
+
+            }
+        });
+        builder.show();
     }
 
     private void logLevelDialog() {
@@ -1345,7 +1376,7 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
         builder.setItems(modes, new DialogInterface.OnClickListener() {
             @Override
             public void onClick(DialogInterface dialog, int which) {
-                socketClient.sendOrder("0x05:level:" + which + "\r");
+                scorder("0x05:level:" + which);
             }
         });
         builder.show();
@@ -1360,9 +1391,9 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
             @Override
             public void onClick(DialogInterface dialog, int which) {
                 if (0 == which) {
-                    socketClient.sendOrder("0x05:IMAGESIZE:" + 2 + "\r");
+                    scorder("0x05:imagesize:" + 2);
                 } else if (1 == which) {
-                    socketClient.sendOrder("0x05:IMAGESIZE:" + 3 + "\r");
+                    scorder("0x05:imagesize:" + 3);
                 }
 
             }
@@ -1378,7 +1409,7 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
         builder.setItems(modes, new DialogInterface.OnClickListener() {
             @Override
             public void onClick(DialogInterface dialog, int which) {
-                socketClient.sendOrder("0x05:AUTOEXPOSURE:" + (which + 1) + "\r");
+                scorder("0x05:autoexposure:" + (which + 1));
             }
         });
         builder.show();
@@ -1392,32 +1423,38 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
         builder.setItems(modes, new DialogInterface.OnClickListener() {
             @Override
             public void onClick(DialogInterface dialog, int which) {
-                socketClient.sendOrder("0x05:WHITEBALANCE:" + which + "\r");
+                scorder("0x05:whitebalance:" + which);
             }
         });
         builder.show();
     }
 
     private void getLog() {
-        socketClient.sendOrder("0x04");
+        scorder("0x04");
     }
 
     private void openCamera() {
-        socketClient.sendOrder("0x01");
+        scorder("0x01");
     }
 
     private void closeCamera() {
-        socketClient.sendOrder("0x03");
+        scorder("0x03");
     }
 
     //打开环境传感器
     private void openenvsensor() {
-        socketClient.sendOrder("0x06");
+        scorder("0x06");
     }
 
     //关闭环境传感器
     private void closeenvsensor() {
-        socketClient.sendOrder("0x07");
+        scorder("0x07");
+    }
+
+    private void scorder(String order) {
+        if (socketClient != null) {
+            socketClient.sendOrder(order);
+        }
     }
 
     private void cmddialog(final String cmd) {
@@ -1434,12 +1471,12 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
                 String etstring = etcommand.getText().toString();
                 String scommand = cmd + etstring;
                 if (!TextUtils.isEmpty(scommand)) {
-                    if (cmd.contains("0x05:TIME_FREQUENCY:")) {
+                    if (cmd.contains("0x05:time_frequency:")) {
                         Integer integer = Integer.valueOf(etstring);
                         int i = (1000 / integer);
                         scommand = cmd + i;
                     }
-                    socketClient.sendOrder(scommand + "\r");
+                    scorder(scommand);
                     alertDialog.dismiss();
                 }
             }
@@ -1453,6 +1490,7 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
         builder.setCancelable(false);
         final EditText ethost = view.findViewById(R.id.host);
         final EditText etport = view.findViewById(R.id.port);
+        String trim = ethost.getText().toString().trim();
         ethost.setText(host);
         etport.setText(port + "");
         TextView cancle = view.findViewById(R.id.cancel);
@@ -1487,129 +1525,6 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
         if (socketClient != null) {
             socketClient.onDestroy();
             conn();
-        }
-    }
-
-
-    private void startLiveData() {
-        Log.e(TAG, "Starting live data..");
-
-        doBindService();
-
-
-        // start command execution
-        new Handler().post(mQueueCommands);
-
-        if (prefs.getBoolean(ConfigActivity.ENABLE_GPS_KEY, false))
-            gpsStart();
-        else
-            // screen won't turn off until wakeLock.release()
-            wakeLock.acquire();
-
-        if (prefs.getBoolean(ConfigActivity.ENABLE_FULL_LOGGING_KEY, false)) {
-
-            // Create the CSV Logger
-            long mils = System.currentTimeMillis();
-            SimpleDateFormat sdf = new SimpleDateFormat("_dd_MM_yyyy_HH_mm_ss");
-
-            try {
-                myCSVWriter = new LogCSVWriter("Log" + sdf.format(new Date(mils)).toString() + ".csv",
-                        prefs.getString(ConfigActivity.DIRECTORY_FULL_LOGGING_KEY,
-                                getString(R.string.default_dirname_full_logging))
-                );
-            } catch (FileNotFoundException | RuntimeException e) {
-                Log.e(TAG, "Can't enable logging to file.", e);
-            }
-        }
-    }
-
-    private void stopLiveData() {
-        Log.e(TAG, "Stopping live data..");
-
-        isChangeFileName = true;
-        gpsStop();
-
-        doUnbindService();
-
-        releaseWakeLockIfHeld();
-
-        final String devemail = prefs.getString(ConfigActivity.DEV_EMAIL_KEY, null);
-        if (devemail != null && !devemail.isEmpty()) {
-            DialogInterface.OnClickListener dialogClickListener = new DialogInterface.OnClickListener() {
-                @Override
-                public void onClick(DialogInterface dialog, int which) {
-                    switch (which) {
-                        case DialogInterface.BUTTON_POSITIVE:
-                            ObdGatewayService.saveLogcatToFile(getApplicationContext(), devemail);
-                            break;
-
-                        case DialogInterface.BUTTON_NEGATIVE:
-                            //No button clicked
-                            break;
-                    }
-                }
-            };
-            AlertDialog.Builder builder = new AlertDialog.Builder(this);
-            builder.setMessage("Where there issues?\nThen please send us the logs.\nSend Logs?").setPositiveButton("Yes", dialogClickListener)
-                    .setNegativeButton("No", dialogClickListener).show();
-        }
-
-        if (myCSVWriter != null) {
-            myCSVWriter.closeLogCSVWriter();
-        }
-    }
-
-
-    private synchronized void gpsStart() {
-        if (!mGpsIsStarted && mLocProvider != null && mLocService != null && mLocService.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-            mLocService.requestLocationUpdates(mLocProvider.getName(), getGpsUpdatePeriod(prefs), getGpsDistanceUpdatePeriod(prefs), this);
-            mGpsIsStarted = true;
-        } else {
-        }
-    }
-
-    private synchronized void gpsStop() {
-        if (mGpsIsStarted) {
-            mLocService.removeUpdates(this);
-            mGpsIsStarted = false;
-        }
-    }
-
-    /**
-     * If lock is held, release. Lock will be held when the service is running.
-     */
-    private void releaseWakeLockIfHeld() {
-        if (wakeLock.isHeld())
-            wakeLock.release();
-    }
-
-    private void doBindService() {
-        if (!isServiceBound) {
-            Log.e(TAG, "Binding OBD service..");
-            if (preRequisites) {
-                btStatus.setText("BT Status:" + getString(R.string.status_bluetooth_connecting));
-                Intent serviceIntent = new Intent(this, ObdGatewayService.class);
-                //                Intent serviceIntent = new Intent(this, MockObdGatewayService.class);
-                bindService(serviceIntent, serviceConn, Context.BIND_AUTO_CREATE);
-            } else {
-                btStatus.setText("BT Status:" + getString(R.string.status_bluetooth_disabled));
-                Intent serviceIntent = new Intent(this, MockObdGatewayService.class);
-                bindService(serviceIntent, serviceConn, Context.BIND_AUTO_CREATE);
-            }
-        }
-    }
-
-    private void doUnbindService() {
-        if (isServiceBound) {
-            if (service.isRunning()) {
-                service.stopService();
-                if (preRequisites)
-                    btStatus.setText("BT Status:" + getString(R.string.status_bluetooth_ok));
-            }
-            Log.e(TAG, "Unbinding OBD service..");
-            unbindService(serviceConn);
-            isServiceBound = false;
-            obdStatus.setText("OBDII Status:" + getString(R.string.status_obd_disconnected));
         }
     }
 
@@ -1650,96 +1565,458 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
         }
     }
 
-    @Override
-    public void stateUpdate(ObdCommandJob job) {
-        final String cmdName = job.getCommand().getName();
-        String cmdResult = "";
-        final String cmdID = LookUpCommand(cmdName);
-        Log.e(TAG, "stateUpdate: " + cmdID);
+    /**
+     * set listeners for data structure changes
+     */
+    private void setDataListeners() {
+        // add pv change listeners to trigger model updates
+        ObdProt.PidPvs.addPvChangeListener(this,
+                PvChangeEvent.PV_ADDED
+                        | PvChangeEvent.PV_CLEARED
+        );
+        ObdProt.VidPvs.addPvChangeListener(this,
+                PvChangeEvent.PV_ADDED
+                        | PvChangeEvent.PV_CLEARED
+        );
+        ObdProt.tCodes.addPvChangeListener(this,
+                PvChangeEvent.PV_ADDED
+                        | PvChangeEvent.PV_CLEARED
+        );
+    }
 
+    /**
+     * set listeners for data structure changes
+     */
+    private void removeDataListeners() {
+        // remove pv change listeners
+        ObdProt.PidPvs.removePvChangeListener(this);
+        ObdProt.VidPvs.removePvChangeListener(this);
+        ObdProt.tCodes.removePvChangeListener(this);
+    }
 
-        if (job.getState().equals(ObdCommandJob.ObdCommandJobState.EXECUTION_ERROR)) {
-            cmdResult = job.getCommand().getResult();
-            if (cmdResult != null && isServiceBound) {
-                obdStatus.setText("OBDII Status:" + cmdResult.toLowerCase());
+    MODE previousMode;
+
+    /**
+     * set new operating mode
+     *
+     * @param mode new mode
+     */
+    public void setMode(MODE mode) {
+        // if this is a mode change, or file reload ...
+        if (mode != this.mode) {
+            switch (mode) {
+                case OFFLINE:
+                    break;
+
+                case ONLINE:
+                    switch (CommService.medium) {
+                        case BLUETOOTH:
+                            // if pre-settings shall be used ...
+                            String address = prefs.getString(PRESELECT.LAST_DEV_ADDRESS.toString(), null);
+                            if (istRestoreWanted(PRESELECT.LAST_DEV_ADDRESS)
+                                    && address != null) {
+                                // ... connect with previously connected device
+                                connectBtDevice(address, prefs.getBoolean("bt_secure_connection", false));
+                            } else {
+                                // ... otherwise launch the BtDeviceListActivity to see devices and do scan
+                                Intent serverIntent = new Intent(this, BtDeviceListActivity.class);
+                                startActivityForResult(serverIntent,
+                                        prefs.getBoolean("bt_secure_connection", false)
+                                                ? REQUEST_CONNECT_DEVICE_SECURE
+                                                : REQUEST_CONNECT_DEVICE_INSECURE);
+                            }
+                            break;
+                    }
+                    break;
+
             }
-        } else if (job.getState().equals(ObdCommandJob.ObdCommandJobState.BROKEN_PIPE)) {
-            if (isServiceBound)
-                stopLiveData();
-        } else if (job.getState().equals(ObdCommandJob.ObdCommandJobState.NOT_SUPPORTED)) {
-            cmdResult = getString(R.string.status_obd_no_support);
-        } else {
-            cmdResult = job.getCommand().getFormattedResult();
-            if (isServiceBound)
-                obdStatus.setText("OBDII Status:" + getString(R.string.status_obd_data));
+            // remember previous mode
+            previousMode = this.mode;
+            // set new mode
+            this.mode = mode;
+            setStatus(mode.toString());
         }
-        if (isRecord) {
-            long ms = System.currentTimeMillis();
-            if (isChangeFileName) {
-                logFileName = LogTools.ms2Date(ms) + ".log";
-                logFile = LogTools.fileSize(MapsActivity.this, logFileName);
-                isChangeFileName = false;
+    }
+
+    /**
+     * Check if restore of specified preselection is wanted from settings
+     *
+     * @param preselect specified preselect
+     * @return flag if preselection shall be restored
+     */
+    boolean istRestoreWanted(PRESELECT preselect) {
+        return prefs.getStringSet(PREF_USE_LAST, emptyStringSet).contains(preselect.toString());
+    }
+
+    private void connectBtDevice(String address, boolean secure) {
+        // Get the BluetoothDevice object
+        BluetoothDevice device = mBluetoothAdapter.getRemoteDevice(address);
+        // Attempt to connect to the device
+        mCommService = new BtCommService(this, mHandler);
+        mCommService.connect(device, secure);
+    }
+
+    /**
+     * Handle bluetooth connection established ...
+     */
+    private void onConnect() {
+        mode = MODE.ONLINE;
+        setStatus(getString(R.string.title_connected_to, mConnectedDeviceName));
+        // send RESET to Elm adapter
+        CommService.elm.reset();
+        setObdService(ObdProt.OBD_SVC_DATA, "OBD Data");
+    }
+
+    /**
+     * Handle bluetooth connection lost ...
+     */
+    private void onDisconnect() {
+        // handle further initialisations
+        setMode(MODE.OFFLINE);
+    }
+
+    private void setStatus(String s) {
+        obdStatus.setText("OBDII Status:" + s);
+    }
+
+    /**
+     * Activate desired OBD service
+     *
+     * @param newObdService OBD service ID to be activated
+     */
+    public void setObdService(int newObdService, CharSequence menuTitle) {
+        // remember this as current OBD service
+        obdService = newObdService;
+
+
+        // set protocol service
+        CommService.elm.setService(newObdService, true);
+
+        // remember this as last selected service
+        if (newObdService > ObdProt.OBD_SVC_NONE)
+            prefs.edit().putInt(PRESELECT.LAST_SERVICE.toString(), newObdService).apply();
+    }
+
+
+    /**
+     * Prompt for selection of a single ECU from list of available ECUs
+     *
+     * @param ecuAdresses List of available ECUs
+     */
+    protected void selectEcu(final Set<Integer> ecuAdresses) {
+        // if more than one ECUs available ...
+        if (ecuAdresses.size() > 1) {
+            int preferredAddress = prefs.getInt(PRESELECT.LAST_ECU_ADDRESS.toString(), 0);
+            // check if last preferred address matches any of the reported addresses
+            if (istRestoreWanted(PRESELECT.LAST_ECU_ADDRESS)
+                    && ecuAdresses.contains(preferredAddress)) {
+                // set addrerss
+                CommService.elm.setEcuAddress(preferredAddress);
             } else {
-                if (LogTools.getFileSize(logFile) > 5.0) {
-                    isChangeFileName = true;
-                } else {
-                    String content = LogTools.ms2Date(ms) + ":" + cmdName + ":" + cmdResult + "\r\n";
-                    LogTools.write2File(logFile, content);
+                // NO match with preference -> allow selection
+
+                // .. allow selection of single ECU address ...
+                final CharSequence[] entries = new CharSequence[ecuAdresses.size()];
+                // create list of entries
+                int i = 0;
+                for (Integer addr : ecuAdresses) {
+                    entries[i++] = String.format("0x%X", addr);
                 }
-            }
-            if (cmdID.equals("SPEED")) {
-                JSONObject object = new JSONObject();
-                try {
-                    obdLongitude.setText("o_Longitude:" + obdlon);
-                    obdLatitude.setText("o_Latitude:" + obdlat);
-                    obdAltitude.setText("o_Altitude:" + obdalt);
-                    speed.setText("o_Speed:" + cmdResult.split("k")[0]);
-                    object.put("timestamp", DateUtil.getDateTimeFromMillis(System.currentTimeMillis()));
-                    object.put("longitude", String.valueOf(obdlon));
-                    object.put("latitude", String.valueOf(obdlat));
-                    object.put("altitude", String.valueOf(obdalt));
-                    object.put("speed", cmdResult.split("k")[0]);
-                    socketClient.sendOrder("0x08:" + object);
-                } catch (JSONException e) {
-                    e.printStackTrace();
-                }
+                // show dialog ...
+                dlgBuilder
+                        .setTitle(R.string.select_ecu_addr)
+                        .setItems(entries, new DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(DialogInterface dialog, int which) {
+                                int address = Integer.parseInt(entries[which].toString().substring(2), 16);
+                                // set address
+                                CommService.elm.setEcuAddress(address);
+                                // set this as preference (preference change will trigger ELM command)
+                                prefs.edit().putInt(PRESELECT.LAST_ECU_ADDRESS.toString(), address).apply();
+                            }
+                        })
+                        .show();
             }
         }
-        commandResult.put(cmdID, cmdResult);
     }
 
-    public static String LookUpCommand(String txt) {
-        for (AvailableCommandNames item : AvailableCommandNames.values()) {
-            if (item.getValue().equals(txt)) return item.name();
+    @Override
+    public void onSharedPreferenceChanged(SharedPreferences sharedPreferences, String key) {
+        // keep main display on?
+        if (key == null || KEEP_SCREEN_ON.equals(key)) {
+            getWindow().addFlags(prefs.getBoolean(KEEP_SCREEN_ON, false)
+                    ? WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+                    : 0);
         }
-        return txt;
+
+        // set default comm medium
+        if (key == null || SettingsActivity.KEY_COMM_MEDIUM.equals(key))
+            CommService.medium =
+                    CommService.MEDIUM.values()[
+                            getPrefsInt(SettingsActivity.KEY_COMM_MEDIUM, 0)];
+
+        // enable/disable ELM adaptive timing
+        if (key == null || ELM_ADAPTIVE_TIMING.equals(key))
+            CommService.elm.mAdaptiveTiming.setMode(
+                    ElmProt.AdaptTimingMode.valueOf(
+                            prefs.getString(ELM_ADAPTIVE_TIMING,
+                                    ElmProt.AdaptTimingMode.OFF.toString())));
+
+        // set protocol flag to initiate immediate reset on NRC reception
+        if (key == null || ELM_RESET_ON_NRC.equals(key))
+            CommService.elm.setResetOnNrc(prefs.getBoolean(ELM_RESET_ON_NRC, false));
+
+        // set custom ELM init commands
+        if (key == null || ELM_CUSTOM_INIT_CMDS.equals(key)) {
+            String value = prefs.getString(ELM_CUSTOM_INIT_CMDS, null);
+            if (value != null && value.length() > 0)
+                CommService.elm.setCustomInitCommands(value.split("\n"));
+        }
+
+        // ELM timeout
+        if (key == null || SettingsActivity.ELM_MIN_TIMEOUT.equals(key))
+            CommService.elm.mAdaptiveTiming.setElmTimeoutMin(
+                    getPrefsInt(SettingsActivity.ELM_MIN_TIMEOUT,
+                            CommService.elm.mAdaptiveTiming.getElmTimeoutMin()));
+
+        // ... measurement system
+        if (key == null || MEASURE_SYSTEM.equals(key))
+            setConversionSystem(getPrefsInt(MEASURE_SYSTEM, EcuDataItem.SYSTEM_METRIC));
+
+        // ... preferred protocol
+        if (key == null || SettingsActivity.KEY_PROT_SELECT.equals(key))
+            ElmProt.setPreferredProtocol(getPrefsInt(SettingsActivity.KEY_PROT_SELECT, 0));
+
+        // set disabled ELM commands
+        if (key == null || SettingsActivity.ELM_CMD_DISABLE.equals(key)) {
+            ElmProt.disableCommands(prefs.getStringSet(SettingsActivity.ELM_CMD_DISABLE, null));
+        }
+
+
+        // Max. data disabling debounce counter
+        if (key == null || PREF_DATA_DISABLE_MAX.equals(key))
+            EcuDataItem.MAX_ERROR_COUNT = getPrefsInt(PREF_DATA_DISABLE_MAX, 3);
     }
 
-    private class UploadAsyncTask extends AsyncTask<ObdReading, Void, Void> {
+    /**
+     * set mesaurement conversion system to metric/imperial
+     *
+     * @param cnvId ID for metric/imperial conversion
+     */
+    void setConversionSystem(int cnvId) {
+        if (EcuDataItem.cnvSystem != cnvId) {
+            // set coversion system
+            EcuDataItem.cnvSystem = cnvId;
+        }
+    }
 
+    private int getPrefsInt(String key, int defaultValue) {
+        int result = defaultValue;
+
+        try {
+            result = Integer.valueOf(prefs.getString(key, String.valueOf(defaultValue)));
+        } catch (Exception ex) {
+        }
+
+        return result;
+    }
+
+    @Override
+    public void pvChanged(PvChangeEvent event) {
+        Message msg = mHandler.obtainMessage(MapsActivity.MESSAGE_DATA_ITEMS_CHANGED);
+        if (!event.isChildEvent()) {
+            msg.obj = event;
+            mHandler.sendMessage(msg);
+        }
+    }
+
+    @Override
+    public void propertyChange(PropertyChangeEvent evt) {
+        /* handle protocol status changes */
+        if (ElmProt.PROP_STATUS.equals(evt.getPropertyName())) {
+            // forward property change to the UI Activity
+            Message msg = mHandler.obtainMessage(MESSAGE_OBD_STATE_CHANGED);
+            msg.obj = evt;
+            mHandler.sendMessage(msg);
+        } else if (ElmProt.PROP_NUM_CODES.equals(evt.getPropertyName())) {
+            // forward property change to the UI Activity
+            Message msg = mHandler.obtainMessage(MESSAGE_OBD_NUMCODES);
+            msg.obj = evt;
+            mHandler.sendMessage(msg);
+        } else if (ElmProt.PROP_ECU_ADDRESS.equals(evt.getPropertyName())) {
+            // forward property change to the UI Activity
+            Message msg = mHandler.obtainMessage(MESSAGE_OBD_ECUS);
+            msg.obj = evt;
+            mHandler.sendMessage(msg);
+        } else if (ObdProt.PROP_NRC.equals(evt.getPropertyName())) {
+            // forward property change to the UI Activity
+            Message msg = mHandler.obtainMessage(MESSAGE_OBD_NRC);
+            msg.obj = evt;
+            mHandler.sendMessage(msg);
+        }
+    }
+
+    /**
+     * Timer Task to cyclically update data screen
+     */
+    private transient final TimerTask updateTask = new TimerTask() {
         @Override
-        protected Void doInBackground(ObdReading... readings) {
-            Log.e(TAG, "Uploading " + readings.length + " readings..");
-            // instantiate reading service client
-            final String endpoint = prefs.getString(ConfigActivity.UPLOAD_URL_KEY, "");
-            RestAdapter restAdapter = new RestAdapter.Builder()
-                    .setEndpoint(endpoint)
-                    .build();
-            ObdService service = restAdapter.create(ObdService.class);
-            // upload readings
-            for (ObdReading reading : readings) {
-                try {
-                    Response response = service.uploadReading(reading);
-                    assert response.getStatus() == 200;
-                } catch (RetrofitError re) {
-                    Log.e(TAG, re.toString());
-                }
-
-            }
-            Log.e(TAG, "Done");
-            return null;
+        public void run() {
+            /* forward message to update the view */
+            Message msg = mHandler.obtainMessage(MapsActivity.MESSAGE_UPDATE_VIEW);
+            mHandler.sendMessage(msg);
         }
+    };
 
-    }
+    /**
+     * Handle message requests
+     */
+    private transient final Handler mHandler = new Handler() {
+        @Override
+        public void handleMessage(Message msg) {
+            try {
+                PropertyChangeEvent evt;
+
+                // log trace message for received handler notification event
+
+                switch (msg.what) {
+                    case MESSAGE_STATE_CHANGE:
+                        // log trace message for received handler notification event
+                        switch ((CommService.STATE) msg.obj) {
+                            case CONNECTED:
+                                onConnect();
+                                break;
+
+                            case CONNECTING:
+                                setStatus(getString(R.string.title_connecting));
+                                break;
+
+                            default:
+                                onDisconnect();
+                                break;
+                        }
+                        break;
+
+                    // data has been read - finish up
+                    case MESSAGE_FILE_READ:
+                        // set listeners for data structure changes
+                        setDataListeners();
+                        // set adapters data source to loaded list instances
+                        //                        mPidAdapter.setPvList(ObdProt.PidPvs);
+                        //                        mVidAdapter.setPvList(ObdProt.VidPvs);
+                        //                        mDfcAdapter.setPvList(ObdProt.tCodes);
+                        // set OBD data mode to the one selected by input file
+                        setObdService(CommService.elm.getService(), getString(R.string.saved_data));
+                        // Check if last data selection shall be restored
+                        //                        if (obdService == ObdProt.OBD_SVC_DATA) {
+                        //                            checkToRestoreLastDataSelection();
+                        //                            checkToRestoreLastViewMode();
+                        //                        }
+                        break;
+
+                    case MESSAGE_DEVICE_NAME:
+                        // save the connected device's name
+                        mConnectedDeviceName = msg.getData().getString(DEVICE_NAME);
+                        Toast.makeText(getApplicationContext(),
+                                getString(R.string.connected_to) + mConnectedDeviceName,
+                                Toast.LENGTH_SHORT).show();
+                        break;
+
+                    case MESSAGE_TOAST:
+                        Toast.makeText(getApplicationContext(),
+                                msg.getData().getString(TOAST),
+                                Toast.LENGTH_SHORT).show();
+                        break;
+
+                    case MESSAGE_DATA_ITEMS_CHANGED:
+                        //                      PvChangeEvent event = (PvChangeEvent) msg.obj;
+                        updateTimer.schedule(updateTask, 0, DISPLAY_UPDATE_TIME);
+                        //                        switch (event.getType()) {
+                        //                            case PvChangeEvent.PV_ADDED:
+                        //                                currDataAdapter.setPvList(currDataAdapter.pvs);
+                        //                                try {
+                        //                                    if (event.getSource() == ObdProt.PidPvs) {
+                        //                                        // Check if last data selection shall be restored
+                        //                                        checkToRestoreLastDataSelection();
+                        //                                        checkToRestoreLastViewMode();
+                        //                                    }
+                        //                                    // set up data update timer
+                        //                                    updateTimer.schedule(updateTask, 0, DISPLAY_UPDATE_TIME);
+                        //                                } catch (Exception ignored) {
+                        //                                }
+                        //                                break;
+                        //
+                        //                            case PvChangeEvent.PV_CLEARED:
+                        //                                currDataAdapter.clear();
+                        //                                break;
+                        //                        }
+                        break;
+
+                    case MESSAGE_UPDATE_VIEW:
+                        PvChangeEvent ev = (PvChangeEvent) msg.obj;
+                        if (ev.getKey().toString().contains("vehicle speed")) {
+                            JSONObject object = new JSONObject();
+                            try {
+                                obdLongitude.setText("o_Longitude:" + obdlon);
+                                obdLatitude.setText("o_Latitude:" + obdlat);
+                                obdAltitude.setText("o_Altitude:" + obdalt);
+                                speed.setText("o_Speed:" + ev.getSource().toString());
+                                object.put("timestamp", DateUtil.getDateTimeFromMillis(System.currentTimeMillis()));
+                                object.put("longitude", String.valueOf(obdlon));
+                                object.put("latitude", String.valueOf(obdlat));
+                                object.put("altitude", String.valueOf(obdalt));
+                                object.put("speed", ev.getSource().toString());
+                                scorder("0x08:" + object);
+                            } catch (JSONException e) {
+                                e.printStackTrace();
+                            }
+                        }
+                        break;
+                    // handle state change in OBD protocol
+                    case MESSAGE_OBD_STATE_CHANGED:
+                        evt = (PropertyChangeEvent) msg.obj;
+                        ElmProt.STAT state = (ElmProt.STAT) evt.getNewValue();
+                        /* Show ELM status only in ONLINE mode */
+                        setStatus(getResources().getStringArray(R.array.elmcomm_states)[state.ordinal()]);
+                        // if last selection shall be restored ...
+                        if (istRestoreWanted(PRESELECT.LAST_SERVICE)) {
+                            if (state == ElmProt.STAT.ECU_DETECTED) {
+                                setObdService(prefs.getInt(PRESELECT.LAST_SERVICE.toString(), 0), null);
+                            }
+                        }
+                        break;
+
+                    // handle change in number of fault codes
+                    case MESSAGE_OBD_NUMCODES:
+                        evt = (PropertyChangeEvent) msg.obj;
+                        //                        setNumCodes((Integer) evt.getNewValue());
+                        break;
+
+                    // handle ECU detection event
+                    case MESSAGE_OBD_ECUS:
+                        evt = (PropertyChangeEvent) msg.obj;
+                        selectEcu((Set<Integer>) evt.getNewValue());
+                        break;
+
+                    // handle negative result code from OBD protocol
+                    case MESSAGE_OBD_NRC:
+                        // reset OBD mode to prevent infinite error loop
+                        setObdService(ObdProt.OBD_SVC_NONE, getText(R.string.obd_error));
+                        // show error dialog ...
+                        evt = (PropertyChangeEvent) msg.obj;
+                        String nrcMessage = (String) evt.getNewValue();
+                        dlgBuilder
+                                .setIcon(android.R.drawable.ic_dialog_alert)
+                                .setTitle(R.string.obd_error)
+                                .setMessage(nrcMessage)
+                                .setPositiveButton(null, null)
+                                .show();
+                        break;
+                }
+            } catch (Exception ex) {
+            }
+        }
+    };
+
 
 }

@@ -8,7 +8,8 @@
     <ScrollView
         android:layout_width="0dp"
         android:layout_height="match_parent"
-        android:layout_weight="1">
+        android:layout_weight="1"
+        android:scrollbars="none">
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -80,7 +81,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:maxLines="1"
-                android:text="m_Bearing:0.0" />
+                android:text="m_Heading:0.0" />
 
             <TextView
                 android:id="@+id/tv_acc_x"
@@ -114,21 +115,20 @@
                 android:id="@+id/obdStatus"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:maxLines="1"
                 android:text="OBDII Status:" />
 
-            <TextView
-                android:id="@+id/btStatus"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:maxLines="1"
-                android:text="BT Status:" />
 
             <TextView
                 android:id="@+id/socketstate"
                 android:layout_width="200dp"
                 android:layout_height="wrap_content"
-                android:text="TX2 Status:disconnected" />
+                android:text="TX2 Status:Record 无效" />
+
+            <TextView
+                android:id="@+id/dbTableNumber"
+                android:layout_width="200dp"
+                android:layout_height="wrap_content"
+                android:text="Recognized Objects:15723" />
 
         </LinearLayout>
     </ScrollView>

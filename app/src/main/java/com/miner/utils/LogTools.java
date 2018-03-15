@@ -46,8 +46,8 @@ public class LogTools {
         return size/1024/1024;
     }
 
-    public static File fileSize(Context mContext, String filename){
-        String s = mContext.getExternalFilesDir("miner").getAbsolutePath();
+    public static File createFile(Context mContext, String folder,String filename){
+        String s = mContext.getExternalFilesDir(folder).getAbsolutePath();
         File saveFile = new File(s, filename);
         return saveFile;
     }

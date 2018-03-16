@@ -1,0 +1,14 @@
+
+*.rawproto
+*.json
+*.lock
+*.lock
+*.xml
+*.xml
+*.bin
+*.bin
+*.lock
+*.bin
+*.bin
+.gradle/4.1/fileHashes/fileHashes.bin
+.gradle/4.1/fileHashes/fileHashes.lock

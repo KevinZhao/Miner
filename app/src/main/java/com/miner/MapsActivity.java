@@ -54,10 +54,12 @@ import android.widget.PopupWindow;
 import android.widget.TextView;
 import android.widget.Toast;
 
-
+import com.fr3ts0n.androbd.plugin.mgr.PluginManager;
 import com.fr3ts0n.ecu.EcuDataItem;
+import com.fr3ts0n.ecu.EcuDataPv;
 import com.fr3ts0n.ecu.prot.obd.ElmProt;
 import com.fr3ts0n.ecu.prot.obd.ObdProt;
+import com.fr3ts0n.pvs.IndexedProcessVar;
 import com.fr3ts0n.pvs.PvChangeEvent;
 import com.fr3ts0n.pvs.PvChangeListener;
 import com.fr3ts0n.pvs.PvList;
@@ -77,7 +79,6 @@ import com.miner.obd.BtCommService;
 import com.miner.obd.CommService;
 import com.miner.socket.SocketClient;
 import com.miner.utils.DateUtil;
-import com.miner.utils.NetworkUtils;
 import com.miner.utils.PermissionUtils;
 
 import org.json.JSONArray;
@@ -94,6 +95,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.Timer;
 import java.util.TimerTask;
+import java.util.logging.Level;
 
 import butterknife.BindView;
 import butterknife.ButterKnife;
@@ -105,6 +107,9 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
         GoogleMap.OnMyLocationClickListener, ActivityCompat.OnRequestPermissionsResultCallback, View.OnClickListener, LocationListener, GpsStatus.Listener, PvChangeListener, PropertyChangeListener,
         SharedPreferences.OnSharedPreferenceChangeListener {
 
+
+    @BindView(R.id.rpm)
+    TextView rpm;
 
     /**
      * operating modes
@@ -192,7 +197,7 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
     private static final int READ_EXTERNAL_STORAGE_CODE = 3;
 
 
-    private static final int DISPLAY_UPDATE_TIME = 1;
+    private static final int DISPLAY_UPDATE_TIME = 200;
     public static final String KEEP_SCREEN_ON = "keep_screen_on";
     public static final String ELM_CUSTOM_INIT_CMDS = "elm_custom_init_cmds";
     /**
@@ -343,6 +348,8 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
     private double obdlon = 0;
     private double obdlat = 0;
     private double obdalt = 0;
+
+    private PvChangeEvent pvEvent=null;
 
     @Override
     protected void onResume() {
@@ -1830,6 +1837,8 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
         }
     }
 
+
+
     @Override
     public void propertyChange(PropertyChangeEvent evt) {
         /* handle protocol status changes */
@@ -1865,6 +1874,7 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
             /* forward message to update the view */
             Message msg = mHandler.obtainMessage(MapsActivity.MESSAGE_UPDATE_VIEW);
             mHandler.sendMessage(msg);
+
         }
     };
 
@@ -1929,48 +1939,60 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
                         break;
 
                     case MESSAGE_DATA_ITEMS_CHANGED:
-                        //                      PvChangeEvent event = (PvChangeEvent) msg.obj;
-                        updateTimer.schedule(updateTask, 0, DISPLAY_UPDATE_TIME);
-                        //                        switch (event.getType()) {
-                        //                            case PvChangeEvent.PV_ADDED:
-                        //                                currDataAdapter.setPvList(currDataAdapter.pvs);
-                        //                                try {
-                        //                                    if (event.getSource() == ObdProt.PidPvs) {
-                        //                                        // Check if last data selection shall be restored
-                        //                                        checkToRestoreLastDataSelection();
-                        //                                        checkToRestoreLastViewMode();
-                        //                                    }
-                        //                                    // set up data update timer
-                        //                                    updateTimer.schedule(updateTask, 0, DISPLAY_UPDATE_TIME);
-                        //                                } catch (Exception ignored) {
-                        //                                }
-                        //                                break;
-                        //
-                        //                            case PvChangeEvent.PV_CLEARED:
-                        //                                currDataAdapter.clear();
-                        //                                break;
-                        //                        }
-                        break;
+                        pvEvent = (PvChangeEvent) msg.obj;
+                        switch (pvEvent.getType()) {
+                            case PvChangeEvent.PV_ADDED:
+                                updateTimer.schedule(updateTask, 0, DISPLAY_UPDATE_TIME);
+                                break;
+                        }
 
                     case MESSAGE_UPDATE_VIEW:
-                        PvChangeEvent ev = (PvChangeEvent) msg.obj;
-                        if (ev.getKey().toString().contains("vehicle speed")) {
-                            JSONObject object = new JSONObject();
-                            try {
-                                obdLongitude.setText("o_Longitude:" + obdlon);
-                                obdLatitude.setText("o_Latitude:" + obdlat);
-                                obdAltitude.setText("o_Altitude:" + obdalt);
-                                speed.setText("o_Speed:" + ev.getSource().toString());
-                                object.put("timestamp", DateUtil.getDateTimeFromMillis(System.currentTimeMillis()));
-                                object.put("longitude", String.valueOf(obdlon));
-                                object.put("latitude", String.valueOf(obdlat));
-                                object.put("altitude", String.valueOf(obdalt));
-                                object.put("speed", ev.getSource().toString());
-                                scorder("0x08:" + object);
-                            } catch (JSONException e) {
-                                e.printStackTrace();
+                        String oSpeed = "0.0", oRpm = "0";
+                        try {
+                            if(pvEvent!=null){
+                                if (pvEvent.getSource() == ObdProt.PidPvs) {
+                                    // Check if last data selection shall be restored
+                                    PvList pvList = (PvList) pvEvent.getSource();
+                                    if (pvList != null && pvList.size() > 0) {
+                                        Iterator<EcuDataPv> it = pvList.values().iterator();
+                                        while (it.hasNext()) {
+                                            EcuDataPv pv = it.next();
+                                            if (pv != null) {
+                                                if (pv.get(EcuDataPv.FID_DESCRIPT).toString().equals("Engine RPM") &&
+                                                        pv.get(EcuDataPv.FID_UNITS).toString().equals("/min")) {
+                                                    oRpm = pv.get(EcuDataPv.FID_VALUE) + "";
+                                                }
+                                                if (pv.get(EcuDataPv.FID_DESCRIPT).toString().equals("Vehicle Speed") &&
+                                                        pv.get(EcuDataPv.FID_UNITS).toString().equals("km/h")) {
+                                                    oSpeed = pv.get(EcuDataPv.FID_VALUE) + "";
+                                                }
+                                            }
+                                        }
+                                        JSONObject object = new JSONObject();
+                                        try {
+                                            obdLongitude.setText("o_Longitude:" + obdlon);
+                                            obdLatitude.setText("o_Latitude:" + obdlat);
+                                            obdAltitude.setText("o_Altitude:" + obdalt);
+                                            speed.setText("o_Speed:" + oSpeed);
+                                            rpm.setText("o_RPM:" + oRpm);
+                                            object.put("timestamp", DateUtil.getDateTimeFromMillis(System.currentTimeMillis()));
+                                            object.put("longitude", String.valueOf(obdlon));
+                                            object.put("latitude", String.valueOf(obdlat));
+                                            object.put("altitude", String.valueOf(obdalt));
+                                            object.put("speed", oSpeed);
+                                            scorder("0x08:" + object);
+                                        } catch (JSONException e) {
+                                            e.printStackTrace();
+                                        }
+                                    }
+                                }
                             }
+
+                            // set up data update timer
+                        } catch (Exception ignored) {
+                            Log.e("error:", "Error adding PV", ignored);
                         }
+
                         break;
                     // handle state change in OBD protocol
                     case MESSAGE_OBD_STATE_CHANGED:
@@ -2014,7 +2036,9 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
                         break;
                 }
             } catch (Exception ex) {
+                ex.printStackTrace();
             }
+
         }
     };
 

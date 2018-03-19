@@ -79,6 +79,7 @@ import com.miner.obd.BtCommService;
 import com.miner.obd.CommService;
 import com.miner.socket.SocketClient;
 import com.miner.utils.DateUtil;
+import com.miner.utils.LogTools;
 import com.miner.utils.PermissionUtils;
 
 import org.json.JSONArray;
@@ -87,8 +88,10 @@ import org.json.JSONObject;
 
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
+import java.io.File;
 import java.text.DecimalFormat;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
@@ -108,8 +111,7 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
         SharedPreferences.OnSharedPreferenceChangeListener {
 
 
-    @BindView(R.id.rpm)
-    TextView rpm;
+    private Timer logTimer = new Timer();
 
     /**
      * operating modes
@@ -120,22 +122,12 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
     }
 
     /**
-     * data view modes
-     */
-    public enum DATA_VIEW_MODE {
-        LIST,       //< data list (un-filtered)
-        FILTERED,   //< data list (filtered)
-    }
-
-    /**
      * Preselection types
      */
     public enum PRESELECT {
         LAST_DEV_ADDRESS,
         LAST_ECU_ADDRESS,
-        LAST_SERVICE,
-        LAST_ITEMS,
-        LAST_VIEW_MODE,
+        LAST_SERVICE
     }
 
 
@@ -291,6 +283,8 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
     TextView obdLatitude;
     @BindView(R.id.obdAltitude)
     TextView obdAltitude;
+    @BindView(R.id.rpm)
+    TextView rpm;
     @BindView(R.id.speed)
     TextView speed;
     @BindView(R.id.exposure)
@@ -349,7 +343,7 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
     private double obdlat = 0;
     private double obdalt = 0;
 
-    private PvChangeEvent pvEvent=null;
+    private PvChangeEvent pvEvent = null;
 
     @Override
     protected void onResume() {
@@ -423,6 +417,31 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
     @Override
     protected void onStart() {
         super.onStart();
+        logTimer.schedule(new TimerTask() {
+            @Override
+            public void run() {
+                String s = MapsActivity.this.getExternalFilesDir("miner").getAbsolutePath();
+                File saveFile = new File(s);
+                File[] files = saveFile.listFiles();
+                List<Long> num = new ArrayList<>();
+                if (files.length > 9) {
+                    for (File file : files) {
+                        String s1 = file.getName().split("\\.")[0];
+                        num.add(Long.parseLong(s1));
+                    }
+                    Collections.sort(num);
+                    int k = 0;
+                    for (int i = num.size() - 1; i >= 0; i--) {
+                        if (k > 9) {
+                            File sf = new File(s, num.get(i) + ".log");
+                            sf.delete();
+                        }
+                        k++;
+                    }
+
+                }
+            }
+        }, 0, 5000);
     }
 
     /**
@@ -1146,6 +1165,9 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
         if (mMap != null) {
             mMap.clear();
         }
+        if (logTimer != null) {
+            logTimer.cancel();
+        }
         if (timer != null && task != null) {
             timer.cancel();
             task.cancel();
@@ -1838,7 +1860,6 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
     }
 
 
-
     @Override
     public void propertyChange(PropertyChangeEvent evt) {
         /* handle protocol status changes */
@@ -1878,6 +1899,10 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
         }
     };
 
+    private boolean isChangeFileName = true;
+    private String logFileName;
+    private File logFile;
+    private int isFirst = 1;
     /**
      * Handle message requests
      */
@@ -1911,17 +1936,7 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
                     case MESSAGE_FILE_READ:
                         // set listeners for data structure changes
                         setDataListeners();
-                        // set adapters data source to loaded list instances
-                        //                        mPidAdapter.setPvList(ObdProt.PidPvs);
-                        //                        mVidAdapter.setPvList(ObdProt.VidPvs);
-                        //                        mDfcAdapter.setPvList(ObdProt.tCodes);
-                        // set OBD data mode to the one selected by input file
                         setObdService(CommService.elm.getService(), getString(R.string.saved_data));
-                        // Check if last data selection shall be restored
-                        //                        if (obdService == ObdProt.OBD_SVC_DATA) {
-                        //                            checkToRestoreLastDataSelection();
-                        //                            checkToRestoreLastViewMode();
-                        //                        }
                         break;
 
                     case MESSAGE_DEVICE_NAME:
@@ -1949,12 +1964,45 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
                     case MESSAGE_UPDATE_VIEW:
                         String oSpeed = "0.0", oRpm = "0";
                         try {
-                            if(pvEvent!=null){
+                            if (pvEvent != null) {
                                 if (pvEvent.getSource() == ObdProt.PidPvs) {
                                     // Check if last data selection shall be restored
                                     PvList pvList = (PvList) pvEvent.getSource();
                                     if (pvList != null && pvList.size() > 0) {
                                         Iterator<EcuDataPv> it = pvList.values().iterator();
+                                        long ms = System.currentTimeMillis();
+                                        if (isChangeFileName) {
+                                            logFileName = LogTools.ms2Date(ms) + ".log";
+                                            logFile = LogTools.createFile(MapsActivity.this, "miner", logFileName);
+                                            isChangeFileName = false;
+                                        } else {
+                                            if (LogTools.getFileSize(logFile) > 5.0) {
+                                                isChangeFileName = true;
+                                            } else {
+                                                while (it.hasNext()) {
+                                                    EcuDataPv pv = it.next();
+                                                    if (pv != null) {
+                                                        String content = LogTools.ms2Date(ms) + ":" + pv.get(EcuDataPv.FID_DESCRIPT).toString() + ":" + pv.get(EcuDataPv.FID_VALUE) + pv.get(EcuDataPv.FID_UNITS) + "\r\n";
+                                                        LogTools.write2File(logFile, content);
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        if (isFirst == 1) {
+                                            logFileName = LogTools.ms2Date(ms) + ".csv";
+                                            logFile = LogTools.createFile(MapsActivity.this, "minercsv", logFileName);
+                                            String c = "MAX,DESCRIPTION,MIN,VALUE,BIT_OFS,OFS,FMT,CNV_ID,PID,MENMONIC,UNITS\n";
+                                            LogTools.write2File(logFile, c);
+                                            while (it.hasNext()) {
+                                                EcuDataPv pv = it.next();
+                                                if (pv != null) {
+                                                    String content = pv.get(EcuDataPv.FID_MAX).toString() + ","+pv.get(EcuDataPv.FID_DESCRIPT).toString() + ","+pv.get(EcuDataPv.FID_MIN).toString() + ","+pv.get(EcuDataPv.FID_VALUE).toString() + ","+pv.get(EcuDataPv.FID_BIT_OFS).toString() + ","+pv.get(EcuDataPv.FID_OFS).toString() + ","+pv.get(EcuDataPv.FID_FORMAT).toString() + ","+pv.get(EcuDataPv.FID_CNVID).toString() + ","+pv.get(EcuDataPv.FID_PID).toString() + ","+pv.get(EcuDataPv.FID_MNEMONIC).toString() + ","+pv.get(EcuDataPv.FID_UNITS).toString() + "\n" ;
+                                                    LogTools.write2File(logFile, content);
+                                                }
+                                            }
+                                        }
+                                        isFirst+=1;
                                         while (it.hasNext()) {
                                             EcuDataPv pv = it.next();
                                             if (pv != null) {

@@ -15,13 +15,13 @@ android {
     buildToolsVersion '26.0.2'
     signingConfigs {
         debug {
-            storeFile file('E:/DemoWork/Miner/miner.jks')//签名文件路径
+            storeFile file('../miner.jks')//签名文件路径
             storePassword "miner314159"
             keyAlias "miner"
             keyPassword "miner314159"  //签名密码
         }
         release {
-            storeFile file('E:/DemoWork/Miner/miner.jks')//签名文件路径
+            storeFile file('../miner.jks')//签名文件路径
             storePassword "miner314159"
             keyAlias "miner"
             keyPassword "miner314159"  //签名密码

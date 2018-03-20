@@ -86,14 +86,14 @@ public class ObdDataPanel extends JPanel
 		java.awt.GridBagConstraints gridBagConstraints;
 
 		jSplitPane1 = new javax.swing.JSplitPane();
-		panGraph = new javax.swing.JPanel();
-		plotter = new com.fr3ts0n.ecu.gui.application.ObdDataPlotter();
-		jPanel1 = new javax.swing.JPanel();
-		jPanel2 = new javax.swing.JPanel();
+		panGraph = new JPanel();
+		plotter = new ObdDataPlotter();
+		jPanel1 = new JPanel();
+		jPanel2 = new JPanel();
 		slGraphTime = new javax.swing.JSlider();
 		lblHistTime = new javax.swing.JLabel();
 		btnClearHist = new javax.swing.JButton();
-		panTable = new javax.swing.JPanel();
+		panTable = new JPanel();
 		jScrollPane1 = new javax.swing.JScrollPane();
 		tblPids = new com.fr3ts0n.pvs.gui.PvTable();
 
@@ -222,14 +222,14 @@ public class ObdDataPanel extends JPanel
 
 	// Variables declaration - do not modify//GEN-BEGIN:variables
 	private javax.swing.JButton btnClearHist;
-	private javax.swing.JPanel jPanel1;
-	private javax.swing.JPanel jPanel2;
+	private JPanel jPanel1;
+	private JPanel jPanel2;
 	private javax.swing.JScrollPane jScrollPane1;
 	private javax.swing.JSplitPane jSplitPane1;
 	private javax.swing.JLabel lblHistTime;
-	private javax.swing.JPanel panGraph;
-	private javax.swing.JPanel panTable;
-	private com.fr3ts0n.ecu.gui.application.ObdDataPlotter plotter;
+	private JPanel panGraph;
+	private JPanel panTable;
+	private ObdDataPlotter plotter;
 	private javax.swing.JSlider slGraphTime;
 	private com.fr3ts0n.pvs.gui.PvTable tblPids;
 	// End of variables declaration//GEN-END:variables

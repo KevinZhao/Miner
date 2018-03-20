@@ -1903,7 +1903,7 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
     private boolean isChangeFileName = true;
     private String logFileName;
     private File logFile;
-    private int isFirst = 1;
+//    private int isFirst = 1;
     /**
      * Handle message requests
      */
@@ -1990,20 +1990,20 @@ public class MapsActivity extends AppCompatActivity implements OnMapReadyCallbac
                                             }
                                         }
 
-                                        if (isFirst == 1) {
-                                            logFileName = LogTools.ms2Date(ms) + ".csv";
-                                            logFile = LogTools.createFile(MapsActivity.this, "minercsv", logFileName);
-                                            String c = "MAX,DESCRIPTION,MIN,VALUE,BIT_OFS,OFS,FMT,CNV_ID,PID,MENMONIC,UNITS\n";
-                                            LogTools.write2File(logFile, c);
-                                            while (it.hasNext()) {
-                                                EcuDataPv pv = it.next();
-                                                if (pv != null) {
-                                                    String content = pv.get(EcuDataPv.FID_MAX).toString() + ","+pv.get(EcuDataPv.FID_DESCRIPT).toString() + ","+pv.get(EcuDataPv.FID_MIN).toString() + ","+pv.get(EcuDataPv.FID_VALUE).toString() + ","+pv.get(EcuDataPv.FID_BIT_OFS).toString() + ","+pv.get(EcuDataPv.FID_OFS).toString() + ","+pv.get(EcuDataPv.FID_FORMAT).toString() + ","+pv.get(EcuDataPv.FID_CNVID).toString() + ","+pv.get(EcuDataPv.FID_PID).toString() + ","+pv.get(EcuDataPv.FID_MNEMONIC).toString() + ","+pv.get(EcuDataPv.FID_UNITS).toString() + "\n" ;
-                                                    LogTools.write2File(logFile, content);
-                                                }
-                                            }
-                                        }
-                                        isFirst+=1;
+//                                        if (isFirst == 1) {
+//                                            logFileName = LogTools.ms2Date(ms) + ".csv";
+//                                            logFile = LogTools.createFile(MapsActivity.this, "minercsv", logFileName);
+//                                            String c = "MAX,DESCRIPTION,MIN,VALUE,BIT_OFS,OFS,FMT,CNV_ID,PID,MENMONIC,UNITS\n";
+//                                            LogTools.write2File(logFile, c);
+//                                            while (it.hasNext()) {
+//                                                EcuDataPv pv = it.next();
+//                                                if (pv != null) {
+//                                                    String content = pv.get(EcuDataPv.FID_MAX).toString() + ","+pv.get(EcuDataPv.FID_DESCRIPT).toString() + ","+pv.get(EcuDataPv.FID_MIN).toString() + ","+pv.get(EcuDataPv.FID_VALUE).toString() + ","+pv.get(EcuDataPv.FID_BIT_OFS).toString() + ","+pv.get(EcuDataPv.FID_OFS).toString() + ","+pv.get(EcuDataPv.FID_FORMAT).toString() + ","+pv.get(EcuDataPv.FID_CNVID).toString() + ","+pv.get(EcuDataPv.FID_PID).toString() + ","+pv.get(EcuDataPv.FID_MNEMONIC).toString() + ","+pv.get(EcuDataPv.FID_UNITS).toString() + "\n" ;
+//                                                    LogTools.write2File(logFile, content);
+//                                                }
+//                                            }
+//                                        }
+//                                        isFirst+=1;
                                         while (it.hasNext()) {
                                             EcuDataPv pv = it.next();
                                             if (pv != null) {
